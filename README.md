@@ -9,14 +9,21 @@ yarn
 
 Change network's parameters ("local") in [hardhat.config.json](hardhat.config.ts):
 
-Change test's parameters in [config.json](config.json):
+Change test's parameters in [data/config.json](./data/config.json):
 
-1. This will deploy the ERC20 contract and will send 30,000 `transferLoop()` transactions, asserting final Other's token balance:
+1. This will deploy the ERC20 contract and will prepare a server to send `transferLoop()` transactions, asserting final Other's token balance:
 ```json
 {
+    "tpsServerHost": "0.0.0.0",
+    "tpsServerPort": 8181,
     "variant": "substrate",
-    "senders": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E000"],
-    "receivers": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E005"],
+    "deployer": {
+        "address": "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b",
+        "privateKey": "0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E342"
+    },
+    "fundSenders": true,
+    "accounts": 100,
+    "workers": 80,
     "sendRawTransaction": true,
     "tokenAddress": "",
     "tokenMethod": "transferLoop",
@@ -24,37 +31,40 @@ Change test's parameters in [config.json](config.json):
     "tokenTransferMultiplier": 1,
     "tokenAssert": true,
     "transactions": 30000,
-    "gasPrice": "",
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
-    "txpoolMultiplier": 2,
-    "txpoolCheckInterval": 1000,
+    "txpoolMultiplier": 3,
     "txpoolCheckDelay": 250,
-    "delay": 0,
+    "txpoolCheckerDelay": 1000,
     "estimate": false
 }
 ```
 
-2. This one already has the token deployed at `tokenAddress`, so it will only send 30,000 `transferLoop()` (5 * `transfer()`) transactions + tokenAssert:
+2. This one already has the token deployed at `tokenAddress`, so it will wait to send `transferLoop()` (5 * `transfer()`) transactions + tokenAssert:
 ```json
 {
+    "tpsServerHost": "0.0.0.0",
+    "tpsServerPort": 8181,
     "variant": "substrate",
-    "senders": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E000"],
-    "receivers": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E005"],
+    "deployer": {
+        "address": "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b",
+        "privateKey": "0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E342"
+    },
+    "fundSenders": true,
+    "accounts": 100,
+    "workers": 80,
     "sendRawTransaction": true,
-    "tokenAddress": "0x030c5D377E202F52CF30b7f855e09aC0589D53ab",
+    "tokenAddress": "",
     "tokenMethod": "transferLoop",
     "tokenAmountToMint": 1000000000,
-    "tokenTransferMultiplier": 5,
+    "tokenTransferMultiplier": 1,
     "tokenAssert": true,
     "transactions": 30000,
-    "gasPrice": "",
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
-    "txpoolMultiplier": 2,
-    "txpoolCheckInterval": 1000,
+    "txpoolMultiplier": 3,
     "txpoolCheckDelay": 250,
-    "delay": 0,
+    "txpoolCheckerDelay": 1000,
     "estimate": false
 }
 ```
@@ -63,23 +73,28 @@ Change test's parameters in [config.json](config.json):
 3. This one has a `transfer()` hardcoded in the `payloads` field:
 ```json
 {
+    "tpsServerHost": "0.0.0.0",
+    "tpsServerPort": 8181,
     "variant": "substrate",
-    "senders": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E000"],
-    "receivers": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E005"],
+    "deployer": {
+        "address": "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b",
+        "privateKey": "0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E342"
+    },
+    "fundSenders": true,
+    "accounts": 100,
+    "workers": 80,
     "sendRawTransaction": true,
-    "tokenAddress": "0x030c5D377E202F52CF30b7f855e09aC0589D53ab",
+    "tokenAddress": "",
     "tokenMethod": "transferLoop",
     "tokenAmountToMint": 1000000000,
     "tokenTransferMultiplier": 1,
     "tokenAssert": true,
     "transactions": 30000,
-    "gasPrice": "",
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
-    "txpoolMultiplier": 2,
-    "txpoolCheckInterval": 1000,
+    "txpoolMultiplier": 3,
     "txpoolCheckDelay": 250,
-    "delay": 0,
+    "txpoolCheckerDelay": 1000,
     "estimate": false,
     "payloads": [
         {
@@ -94,23 +109,28 @@ Change test's parameters in [config.json](config.json):
 4. This one sends ETH (`send()`) via `payloads` field and assert the destination `"to"` ETH balance at the end:
 ```json
 {
+    "tpsServerHost": "0.0.0.0",
+    "tpsServerPort": 8181,
     "variant": "substrate",
-    "senders": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E342"],
-    "receivers": ["0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E005"],
+    "deployer": {
+        "address": "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b",
+        "privateKey": "0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E342"
+    },
+    "fundSenders": true,
+    "accounts": 100,
+    "workers": 80,
     "sendRawTransaction": true,
     "tokenAddress": "",
     "tokenMethod": "transferLoop",
     "tokenAmountToMint": 1000000000,
     "tokenTransferMultiplier": 1,
-    "tokenAssert": false,
+    "tokenAssert": true,
     "transactions": 30000,
-    "gasPrice": "",
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
-    "txpoolMultiplier": 2,
-    "txpoolCheckInterval": 1000,
+    "txpoolMultiplier": 3,
     "txpoolCheckDelay": 250,
-    "delay": 0,
+    "txpoolCheckerDelay": 1000,
     "estimate": false,
     "payloads": [
         {
@@ -122,14 +142,35 @@ Change test's parameters in [config.json](config.json):
 }
 ```
 
-To run the script:
+To run the TPS server:
 
 ```shell
-npx hardhat run scripts/tps.ts --network local
+npx hardhat run scripts/tps-server.ts --network local
 ```
 
-To run it with a different `config.json` file (eg `config2.json`):
+After the initial setup is done, you can trigger an "auto" run by:
+```shell
+curl -X GET "http://0.0.0.0:8181/auto"
+```
+
+That command will send `30,000` transactions to the target using `80` threads (set by `transactions` and `workers` in the [data/config.json](./data/config.json)).
+
+
+Or sending requests via `artillery`/`wrk` to:
+```shell
+artillery quick --count 50 --num 500 http://0.0.0.0:8181/sendRawTransaction
+```
+
+That command will send 25,000 (`50` "users" sending `500` requests each) requests to `/sendRawTransaction`.
+
+```
+wrk -t 50 -c 50 -d 600 --latency --timeout 1m http://0.0.0.0:8181/sendRawTransaction
+```
+
+That command will spawn 50 threads to send requests to `/sendRawTransaction` in 600 seconds.
+
+To run it using a different JSON files directory (other than `data/`) by setting `EVM_TPS_ROOT_DIR`:
 
 ```shell
-EVM_TPS_CONFIG="path/to/config2.json" npx hardhat run scripts/tps.ts --network local
+EVM_TPS_ROOT_DIR="path/to/dir" npx hardhat run scripts/tps-server.ts --network local
 ```
