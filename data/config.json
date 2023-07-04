@@ -10,7 +10,7 @@
   "accounts": 100,
   "workers": 80,
   "sendRawTransaction": true,
-  "timeout": 5000,
+  "timeout": 15000,
   "tokenAddress": "",
   "tokenMethod": "transferLoop",
   "tokenAmountToMint": 1000000000,
