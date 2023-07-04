@@ -35,6 +35,7 @@ const receiptsMap = new Map<string, any>();
 
 const workersMap = new Map<number, boolean>();
 const sendersInUseMap = new Map<number, boolean>();
+const sendersTxnMap = new Map<number, number>();
 const sendersErrMap = new Map<number, number>();
 
 const reqErrorsMap = new Map<number, string>();
@@ -478,15 +479,18 @@ const updateBalances = async (config: TPSConfig) => {
   }
 }
 
-const resetMaps = () => {
+const resetMaps = (config: TPSConfig) => {
   sendersMap.clear();
   sendersInUseMap.clear();
+  sendersTxnMap.clear();
   receiversMap.clear();
   receiptsMap.clear();
   nonceMap.clear();
   workersMap.clear();
   sendersErrMap.clear();
   reqErrorsMap.clear();
+  initNumberMap(sendersErrMap, config.accounts, 0);
+  initNumberMap(sendersTxnMap, config.accounts, 0);
 }
 
 const setupDirs = () => {
@@ -606,6 +610,7 @@ const autoSendRawTransaction = async (
     }
   } catch (error: any) {
     sendersErrMap.set(senderKey, sendersErrMap.get(senderKey)! + 1);
+    sendersTxnMap.set(senderKey, sendersTxnMap.get(senderKey)! - 1);
     msg = `[ERROR]${pre} auto: ${error.message} ${post}`;
     reqErrorsMap.set(reqErrCounter, msg);
     reqErrCounter++;
@@ -618,6 +623,7 @@ const autoSendRawTransaction = async (
 const auto = async (config: TPSConfig, gasLimit: BigNumber, gasPrice: BigNumber, chainId: number) => {
   const staticProvider = new ethers.providers.StaticJsonRpcProvider(config.endpoint, { name: 'tps', chainId });
 
+  let maxTxnPerSender = Math.ceil(config.transactions / config.accounts);
   let status_code = 0;
   let msg = "";
   const start = Date.now();
@@ -629,17 +635,18 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, gasPrice: BigNumber,
     let counter = 0;
     while ((reqCounter - initialCounter) < config.transactions) {
       await checkTxpool(config);
-      workerId = await getFreeWorker(config, workerId);
-      const nonce = nonceMap.get(nextKey)!;
-      reqCounter++;
-      autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, gasPrice, chainId);
-      nextKey++;
-      if (nextKey >= config.accounts) nextKey = 0;
-      while (sendersInUseMap.get(nextKey)!) {
+      while (sendersInUseMap.get(nextKey)! || sendersTxnMap.get(nextKey)! >= maxTxnPerSender) {
         nextKey++;
         if (nextKey >= config.accounts) nextKey = 0;
         await new Promise(r => setTimeout(r, 1));
       }
+      workerId = await getFreeWorker(config, workerId);
+      const nonce = nonceMap.get(nextKey)!;
+      reqCounter++;
+      autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, gasPrice, chainId);
+      sendersTxnMap.set(nextKey, sendersTxnMap.get(nextKey)! + 1);
+      nextKey++;
+      if (nextKey >= config.accounts) nextKey = 0;
       workerId++;
       counter++;
       if (counter >= config.transactions) {
@@ -673,7 +680,7 @@ const setup = async () => {
   let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
   let config = await setConfig(EVM_TPS_CONFIG_FILE, deployer);
 
-  resetMaps();
+  resetMaps(config);
 
   await setupAccounts(config, EVM_TPS_SENDERS_FILE, EVM_TPS_RECEIVERS_FILE);
 
@@ -706,7 +713,6 @@ const main = async () => {
 
   app.get("/auto", async (req: any, res: any) => {
     config = await setup();
-    initNumberMap(sendersErrMap, config.accounts, 0);
     const [status, msg] = await auto(config, gasLimit, gasPrice, chainId);
     if (status === 0) res.send(msg);
     else res.status(500).send(`Internal error: ${msg}`);
