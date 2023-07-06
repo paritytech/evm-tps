@@ -42,9 +42,10 @@ const reqErrorsMap = new Map<number, string>();
 
 let txPoolLength = 0;
 let reqCounter = 0;
-let reqErrCounter = 1;
+let reqErrCounter = 0;
 let nextKey = 0;
 let lastTxHash = "";
+let hardstop = false;
 
 const zeroPad = (num: number, places: number) => String(num).padStart(places, '0')
 
@@ -288,12 +289,14 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
       chainId,
     };
     let payload = await deployer.signTransaction(unsigned);
-    txHash = (await post(config, "eth_sendRawTransaction", [payload])).result;
+    let data = await post(config, "eth_sendRawTransaction", [payload])
+    let txHash = data.result;
+    if (txHash === undefined) throw Error(`[ERROR] batchMintTokens() -> ${JSON.stringify(data)}`);
     console.log(`[batchMintTokens] Minting tokens to ${sender.address} -> ${txHash}`);
     if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
     nonce++;
   }
-  await getReceiptLocally(txHash, 200, 60);
+  await getReceiptLocally(txHash!, 200, 60);
 }
 
 const batchSendEthers = async (config: TPSConfig, deployer: Wallet) => {
@@ -309,19 +312,21 @@ const batchSendEthers = async (config: TPSConfig, deployer: Wallet) => {
     let unsigned = {
       from: deployer.address,
       to: sender.address,
-      value: ethers.utils.parseEther("1"),
+      value: ethers.utils.parseEther("1000"),
       gasLimit,
       gasPrice,
       nonce,
       chainId,
     };
     let payload = await deployer.signTransaction(unsigned);
-    txHash = (await post(config, "eth_sendRawTransaction", [payload])).result;
+    let data = await post(config, "eth_sendRawTransaction", [payload])
+    let txHash = data.result;
+    if (txHash === undefined) throw Error(`[ERROR] batchSendEthers() -> ${JSON.stringify(data)}`);
     console.log(`[batchSendEthers] Sending ETH to ${sender.address} -> ${txHash}`);
     if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
     nonce++;
   }
-  await getReceiptLocally(txHash, 200, 60);
+  await getReceiptLocally(txHash!, 200, 60);
 }
 
 const sendRawTransaction = async (
@@ -526,6 +531,13 @@ const initNumberMap = (m: Map<number, any>, length: number, value: any) => {
   for (let i = 0; i < length; i++) m.set(i, value);
 }
 
+const printNumberMap = (m: Map<number, any>) => {
+  let msg = "\n\n";
+  for (let i = 0; i < m.size; i++) msg += `\n[printMap][${zeroPad(i, 5)}] ${m.get(i)!}`;
+  msg += "\n\n"
+  return msg;
+}
+
 const getFreeWorker = async (config: TPSConfig, workerId: number) => {
   if (workerId >= config.workers) workerId = 0;
   while (workersMap.get(workerId)!) {
@@ -549,11 +561,7 @@ const resendAuto = async (
   sendersErrMap.clear();
 
   console.log(`\n\n----- Resending ${reqErrorsMap.size} Failed Requests -----\n\n`);
-
-  for (let i = 0; i < reqErrorsMap.size; i++) {
-    let msg = reqErrorsMap.get(i)!;
-    console.log(`[resendAuto][${zeroPad(i, 5)}]${msg}`);
-  }
+  console.log(printNumberMap(reqErrorsMap));
 
   reqCounter -= reqErrorsMap.size;
   reqErrorsMap.clear();
@@ -596,7 +604,7 @@ const autoSendRawTransaction = async (
     const txHash = await sendRawTransaction(config, senderKey, nonce, gasLimit, gasPrice, chainId);
     if (txHash) {
       const t = Date.now() - start;
-      const postWithTime = `${post} [time: ${zeroPad(t, 5)} ${t > 12000 ? " ***" : ""}]`;
+      const postWithTime = `${post} [time: ${zeroPad(t, 5)}${t > 12000 ? " ***" : ""}]`;
       msg = `${pre} auto: ${txHash} ${postWithTime}`;
       console.log(msg);
 
@@ -611,7 +619,7 @@ const autoSendRawTransaction = async (
   } catch (error: any) {
     sendersErrMap.set(senderKey, sendersErrMap.get(senderKey)! + 1);
     sendersTxnMap.set(senderKey, sendersTxnMap.get(senderKey)! - 1);
-    msg = `[ERROR]${pre} auto: ${error.message} ${post}`;
+    msg = `${pre} auto: ${error.message} ${post}`;
     reqErrorsMap.set(reqErrCounter, msg);
     reqErrCounter++;
   }
@@ -634,6 +642,14 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, gasPrice: BigNumber,
 
     let counter = 0;
     while ((reqCounter - initialCounter) < config.transactions) {
+      if (hardstop) {
+        hardstop = false;
+        return [0, "HARD_STOP"];
+      }
+      if (reqErrorsMap.size >= 1000) {
+        console.log(printNumberMap(reqErrorsMap));
+        return [0, `TOO_MANY_REQ_ERRORS: ${reqErrorsMap.size}`];
+      }
       await checkTxpool(config);
       while (sendersInUseMap.get(nextKey)! || sendersTxnMap.get(nextKey)! >= maxTxnPerSender) {
         nextKey++;
@@ -656,6 +672,8 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, gasPrice: BigNumber,
     }
 
     while (reqErrorsMap.size > 0) await resendAuto(config, workerId, gasLimit, gasPrice, chainId);
+
+    while (txPoolLength > 0) await new Promise(r => setTimeout(r, 100));
 
     let tpsResult = await calculateTPS(config, chainId, startingBlock);
     reqErrorsMap.clear();
@@ -694,6 +712,8 @@ const setup = async () => {
 
   console.log(JSON.stringify(config, null, 2));
 
+  hardstop = false;
+
   return config!;
 }
 
@@ -715,7 +735,7 @@ const main = async () => {
     config = await setup();
     const [status, msg] = await auto(config, gasLimit, gasPrice, chainId);
     if (status === 0) res.send(msg);
-    else res.status(500).send(`Internal error: ${msg}`);
+    else res.status(500).send(`Internal error: /auto ${msg}`);
   });
 
   app.get("/sendRawTransaction", async (req: any, res: any) => {
@@ -742,7 +762,7 @@ const main = async () => {
       res.send(msg);
     } catch (error: any) {
       console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(k, 5)}] sendRawTransaction: ${error.message}`);
-      res.status(500).send(`Internal error: ${error.message}`);
+      res.status(500).send(`Internal error: /sendRawTransaction ${error.message}`);
     }
   });
 
@@ -761,7 +781,7 @@ const main = async () => {
       res.send(msg);
     } catch (error: any) {
       console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(k, 5)}] getBlock: ${error.message}`);
-      res.status(500).send(`Internal error: ${error.message}`);
+      res.status(500).send(`Internal error: /getBlock ${error.message}`);
     }
   });
 
@@ -781,7 +801,7 @@ const main = async () => {
       res.send(msg);
     } catch (error: any) {
       console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(-1, 5)}] reset: ${error.message}`);
-      res.status(500).send(`Internal error: ${error.message}`);
+      res.status(500).send(`Internal error: /stats ${error.message}`);
     }
   });
 
@@ -795,7 +815,30 @@ const main = async () => {
       res.send(msg);
     } catch (error: any) {
       console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(-1, 5)}] reset: ${error.message}`);
-      res.status(500).send(`Internal error: ${error.message}`);
+      res.status(500).send(`Internal error: /reset ${error.message}`);
+    }
+  });
+
+  app.get("/dumpErrors", async (req: any, res: any) => {
+    try {
+      const msg = `----- dumpErrors: ${printNumberMap(reqErrorsMap)}`;
+      console.log(msg);
+      res.send(msg);
+    } catch (error: any) {
+      res.status(500).send(`Internal error: /dumpErrors ${error.message}`);
+    }
+  });
+
+  app.get("/stop", async (req: any, res: any) => {
+    try {
+      const start = Date.now();
+      hardstop = true;
+      const t = Date.now() - start;
+      const msg = `[req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(-1, 5)}] stop: [b: - | t: ${t}]`;
+      console.log(msg);
+      res.send(msg);
+    } catch (error: any) {
+      res.status(500).send(`Internal error: /stop ${error.message}`);
     }
   });
 
