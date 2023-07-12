@@ -1,7 +1,7 @@
 # Simple EVM TPS tool
 
 ```shell
-git clone https://github.com/arturgontijo/evm-tps.git
+git clone https://github.com/paritytech/evm-tps.git
 cd evm-tps
 
 yarn
@@ -35,8 +35,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
-    "txpoolCheckDelay": 250,
-    "txpoolCheckerDelay": 1000,
+    "checkersInterval": 250,
     "estimate": false
 }
 ```
@@ -65,8 +64,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
-    "txpoolCheckDelay": 250,
-    "txpoolCheckerDelay": 1000,
+    "checkersInterval": 250,
     "estimate": false
 }
 ```
@@ -96,8 +94,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
-    "txpoolCheckDelay": 250,
-    "txpoolCheckerDelay": 1000,
+    "checkersInterval": 250,
     "estimate": false,
     "payloads": [
         {
@@ -133,8 +130,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
-    "txpoolCheckDelay": 250,
-    "txpoolCheckerDelay": 1000,
+    "checkersInterval": 250,
     "estimate": false,
     "payloads": [
         {

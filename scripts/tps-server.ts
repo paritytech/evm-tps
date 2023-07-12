@@ -41,6 +41,11 @@ const sendersErrMap = new Map<number, number>();
 const reqErrorsMap = new Map<number, string>();
 
 let txPoolLength = 0;
+
+// Should be sufficient to send 100k transactions
+let gasPrice = ethers.BigNumber.from(1_000_000_000_000);
+let chainGasPrice = ethers.BigNumber.from(0);
+
 let reqCounter = 0;
 let reqErrCounter = 0;
 let nextKey = 0;
@@ -72,8 +77,7 @@ interface TPSConfig {
   gasLimit: string;
   txpoolMaxLength: number;
   txpoolMultiplier: number;
-  txpoolCheckDelay: number;
-  txpoolCheckerDelay: number;
+  checkersInterval: number;
   estimate: boolean | undefined;
   payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
 }
@@ -129,8 +133,7 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     gasLimit: "200000",
     txpoolMaxLength: -1,
     txpoolMultiplier: 2,
-    txpoolCheckDelay: 250,
-    txpoolCheckerDelay: 1000,
+    checkersInterval: 250,
     estimate: false,
     payloads: undefined,
   };
@@ -140,11 +143,18 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     config = { ...config, ...fromJSON };
   }
 
-  const gasPrice = await ethers.provider.getGasPrice();
   const gasLimit = ethers.BigNumber.from(config.gasLimit);
+
+  chainGasPrice = await ethers.provider.getGasPrice();
+  if (chainGasPrice.mul(2).gt(gasPrice)) gasPrice = chainGasPrice.mul(2);
 
   let tokenAddress = config.tokenAddress || "";
   if (tokenAddress === "" && config.payloads?.length) tokenAddress = config.payloads[0].to ? config.payloads[0].to : tokenAddress;
+
+  if (tokenAddress !== "") {
+    const bytecode = await ethers.provider.getCode(tokenAddress);
+    if (bytecode.length <= 2) tokenAddress = "";  // 0x
+  }
 
   if (tokenAddress === "" && config.payloads === undefined) {
     const token = await deploy(deployer);
@@ -167,7 +177,6 @@ const setTxpool = async (config: TPSConfig) => {
     else {
       const sender = sendersMap.get(0)!;
       const receiver = receiversMap.get(0)!;
-      const gasPrice = await ethers.provider.getGasPrice();
       const token = (await ethers.getContractFactory("SimpleToken", sender)).attach(config.tokenAddress);
       // @ts-ignore
       estimateGasTx = await token.estimateGas[config.tokenMethod](config.tokenTransferMultiplier, receiver.address, 1, { gasPrice });
@@ -179,7 +188,7 @@ const setTxpool = async (config: TPSConfig) => {
       config.gasLimit = estimateGasTx.toString();
     }
 
-    // We pre calculate the max txn per block we can get and set the txpool max size to 3x as it is.
+    // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
     console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
     let lastBlock = await ethers.provider.getBlock("latest");
     console.log(`[Txpool] Block gasLimit   : ${lastBlock.gasLimit}`);
@@ -272,7 +281,6 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
   const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.tokenAddress);
 
   const gasLimit = ethers.BigNumber.from("1000000");
-  const gasPrice = await deployer.getGasPrice();
   const chainId = await deployer.getChainId();
 
   let nonce = await deployer.getTransactionCount();
@@ -289,9 +297,9 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
       chainId,
     };
     let payload = await deployer.signTransaction(unsigned);
-    let data = await post(config, "eth_sendRawTransaction", [payload])
+    let data = await post(config, "eth_sendRawTransaction", [payload]);
     let txHash = data.result;
-    if (txHash === undefined) throw Error(`[ERROR] batchMintTokens() -> ${JSON.stringify(data)}`);
+    if (!validTxHash(txHash)) throw Error(`[ERROR] batchMintTokens() -> ${JSON.stringify(data)}`);
     console.log(`[batchMintTokens] Minting tokens to ${sender.address} -> ${txHash}`);
     if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
     nonce++;
@@ -301,7 +309,6 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
 
 const batchSendEthers = async (config: TPSConfig, deployer: Wallet) => {
   const gasLimit = ethers.BigNumber.from("1000000");
-  const gasPrice = await deployer.getGasPrice();
   const chainId = await deployer.getChainId();
 
   let nonce = await deployer.getTransactionCount();
@@ -319,9 +326,9 @@ const batchSendEthers = async (config: TPSConfig, deployer: Wallet) => {
       chainId,
     };
     let payload = await deployer.signTransaction(unsigned);
-    let data = await post(config, "eth_sendRawTransaction", [payload])
+    let data = await post(config, "eth_sendRawTransaction", [payload]);
     let txHash = data.result;
-    if (txHash === undefined) throw Error(`[ERROR] batchSendEthers() -> ${JSON.stringify(data)}`);
+    if (!validTxHash(txHash)) throw Error(`[ERROR] batchSendEthers() -> ${JSON.stringify(data)}`);
     console.log(`[batchSendEthers] Sending ETH to ${sender.address} -> ${txHash}`);
     if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
     nonce++;
@@ -334,7 +341,6 @@ const sendRawTransaction = async (
   k: number,
   nonce: number,
   gasLimit: BigNumber,
-  gasPrice: BigNumber,
   chainId: number,
 ) => {
   const sender = sendersMap.get(k)!;
@@ -352,9 +358,9 @@ const sendRawTransaction = async (
     chainId,
   };
   let payload = await sender.signTransaction(unsigned);
-  let data = await post(config, "eth_sendRawTransaction", [payload])
+  let data = await post(config, "eth_sendRawTransaction", [payload]);
   let txHash = data.result;
-  if (txHash === undefined) throw Error(`[ERROR] sendRawTransaction() -> ${JSON.stringify(data)}`);
+  if (!validTxHash(txHash)) throw Error(`[ERROR] sendRawTransaction() -> ${JSON.stringify(data)}`);
   return txHash;
 }
 
@@ -377,7 +383,7 @@ const receiptsFetcher = async (config: TPSConfig) => {
           }
         }
         if (receipts === undefined) throw Error(`Not able to fetch receipts using parity_getBlockReceipts for ${block.number}!`);
-        console.log(`[ReceiptsFetcher] Got ${receipts.length} receipts from block ${parseInt(block.number, 16)} [Txpool len=${txPoolLength}]`);
+        console.log(`[ReceiptsFetcher] Got ${receipts.length} receipts from block ${parseInt(block.number, 16)} [gasPrice: ${printGasPrice(chainGasPrice)} | pool: ${txPoolLength}]`);
         for (let r of receipts) {
           // Storing just (hash, status) to save memory.
           receiptsMap.set(r.transactionHash, r.status);
@@ -385,7 +391,7 @@ const receiptsFetcher = async (config: TPSConfig) => {
       }
       blockNumber = block.number;
     } catch { }
-    await new Promise(r => setTimeout(r, config.txpoolCheckerDelay));
+    await new Promise(r => setTimeout(r, config.checkersInterval));
   }
 }
 
@@ -408,11 +414,9 @@ const txpoolChecker = async (config: TPSConfig) => {
   if (config.variant === "geth") method = "txpool_content";
   else if (config.variant === "parity") method = "parity_pendingTransactions";
 
-  let last = 0;
-  let result;
   while (1) {
     try {
-      result = await waitForResponse(config, method, [], 250, 1);
+      let result = await waitForResponse(config, method, [], 250, 1);
       if (config.variant === "geth") {
         let pending: any = [];
         for (let k of Object.keys(result.pending)) {
@@ -420,10 +424,28 @@ const txpoolChecker = async (config: TPSConfig) => {
         }
         txPoolLength = pending.length;
       } else txPoolLength = result.length;
-      last = txPoolLength;
     } catch { txPoolLength = -1; }
-    await new Promise(r => setTimeout(r, config.txpoolCheckerDelay));
+    await new Promise(r => setTimeout(r, config.checkersInterval));
   }
+}
+
+const gasPriceChecker = async (config: TPSConfig) => {
+  while (1) {
+    try {
+      let result = await waitForResponse(config, "eth_gasPrice", [], 250, 1);
+      chainGasPrice = ethers.BigNumber.from(result);
+      if (chainGasPrice.mul(2).gte(gasPrice)) gasPrice = chainGasPrice.mul(2);
+    } catch { }
+    await new Promise(r => setTimeout(r, config.checkersInterval));
+  }
+}
+
+const printGasPrice = (value: BigNumber) => {
+  let normalized = `${Math.round(value.div(1_000_000).toNumber())}M`;
+  if (value.gte(1_000_000_000)) normalized = `${Math.round(value.div(1_000_000_000).toNumber())}B`;
+  if (value.gte(1_000_000_000_000)) normalized = `${Math.round(value.div(1_000_000_000_000).toNumber())}T`;
+  if (value.gte(1_000_000_000_000_000)) normalized = `${Math.round(value.div(1_000_000_000_000_000).toNumber())}Q`;
+  return normalized;
 }
 
 const checkTxpool = async (config: TPSConfig) => {
@@ -446,7 +468,7 @@ const checkETHBalances = async (config: TPSConfig, deployer: Wallet) => {
   const sender = sendersMap.get(0)!;
   const balance = await sender.getBalance();
   console.log(`[checkETHBalances] ${sender.address} ETH balance: ${balance}`);
-  if (balance.isZero()) await batchSendEthers(config, deployer);
+  if (balance.lte(ethers.utils.parseEther("750"))) await batchSendEthers(config, deployer);
 }
 
 const assertTokenBalances = async (config: TPSConfig) => {
@@ -489,6 +511,7 @@ const resetMaps = (config: TPSConfig) => {
   sendersInUseMap.clear();
   sendersTxnMap.clear();
   receiversMap.clear();
+  rcvBalances.clear();
   receiptsMap.clear();
   nonceMap.clear();
   workersMap.clear();
@@ -548,11 +571,17 @@ const getFreeWorker = async (config: TPSConfig, workerId: number) => {
   return workerId;
 }
 
+const validTxHash = (txHash: string | undefined) => {
+  if (txHash === undefined || txHash === null) return false;
+  if (!txHash?.startsWith('0x')) return false;
+  if (txHash?.length !== 66) return false;
+  return true;
+}
+
 const resendAuto = async (
   config: TPSConfig,
   workerId: number,
   gasLimit: BigNumber,
-  gasPrice: BigNumber,
   chainId: number,
 ) => {
   while (workersMap.size > 0) { await new Promise(r => setTimeout(r, 50)) };
@@ -573,7 +602,7 @@ const resendAuto = async (
       await checkTxpool(config);
       workerId = await getFreeWorker(config, workerId);
       reqCounter++;
-      autoSendRawTransaction(config, workerId, k, nonce, gasLimit, gasPrice, chainId);
+      autoSendRawTransaction(config, workerId, k, nonce, gasLimit, chainId);
       nonce++;
       workerId++;
     }
@@ -589,20 +618,22 @@ const autoSendRawTransaction = async (
   senderKey: number,
   nonce: number,
   gasLimit: BigNumber,
-  gasPrice: BigNumber,
   chainId: number,
 ) => {
   sendersInUseMap.set(senderKey, true);
   workersMap.set(workerId, true);
 
   const pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(senderKey, 5)}]`;
-  const post = `[wrk: ${zeroPad(workerId, 5)}(len=${zeroPad(workersMap.size, 5)}) nonce: ${zeroPad(nonce, 5)} | pool: ${zeroPad(txPoolLength, 5)} | err=${reqErrorsMap.size}]`;
+  let post = `[wrk: ${zeroPad(workerId, 5)}(len=${zeroPad(workersMap.size, 5)}) `;
+  post += `nonce: ${zeroPad(nonce, 5)} | `;
+  post += `gasPrice: ${printGasPrice(gasPrice)} / ${printGasPrice(chainGasPrice)} | `;
+  post += `pool: ${zeroPad(txPoolLength, 5)} | err=${reqErrorsMap.size}]`;
   let msg = "";
 
   const start = Date.now();
   try {
-    const txHash = await sendRawTransaction(config, senderKey, nonce, gasLimit, gasPrice, chainId);
-    if (txHash) {
+    const txHash = await sendRawTransaction(config, senderKey, nonce, gasLimit, chainId);
+    if (validTxHash(txHash)) {
       const t = Date.now() - start;
       const postWithTime = `${post} [time: ${zeroPad(t, 5)}${t > 12000 ? " ***" : ""}]`;
       msg = `${pre} auto: ${txHash} ${postWithTime}`;
@@ -615,7 +646,7 @@ const autoSendRawTransaction = async (
       let amounts = rcvBalances.get(senderKey)!;
       amounts.after++;
       rcvBalances.set(senderKey, amounts);
-    }
+    } else { throw Error(`Invalid txHash: ${txHash}`) }
   } catch (error: any) {
     sendersErrMap.set(senderKey, sendersErrMap.get(senderKey)! + 1);
     sendersTxnMap.set(senderKey, sendersTxnMap.get(senderKey)! - 1);
@@ -628,7 +659,7 @@ const autoSendRawTransaction = async (
   workersMap.delete(workerId);
 }
 
-const auto = async (config: TPSConfig, gasLimit: BigNumber, gasPrice: BigNumber, chainId: number) => {
+const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => {
   const staticProvider = new ethers.providers.StaticJsonRpcProvider(config.endpoint, { name: 'tps', chainId });
 
   let maxTxnPerSender = Math.ceil(config.transactions / config.accounts);
@@ -640,38 +671,34 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, gasPrice: BigNumber,
     let startingBlock = await staticProvider.getBlock("latest");
     let initialCounter = reqCounter;
 
-    let counter = 0;
     while ((reqCounter - initialCounter) < config.transactions) {
       if (hardstop) {
         hardstop = false;
         return [0, "HARD_STOP"];
       }
-      if (reqErrorsMap.size >= 1000) {
+      // 5% of errors is too much, something is wrong.
+      if (reqErrorsMap.size >= (config.transactions * 0.05)) {
         console.log(printNumberMap(reqErrorsMap));
-        return [0, `TOO_MANY_REQ_ERRORS: ${reqErrorsMap.size}`];
+        let p = Math.round((reqErrorsMap.size / config.transactions) * 100);
+        return [0, `TOO_MANY_ERRORS: ${reqErrorsMap.size}/${config.transactions} [~${p}%]`];
       }
       await checkTxpool(config);
       while (sendersInUseMap.get(nextKey)! || sendersTxnMap.get(nextKey)! >= maxTxnPerSender) {
         nextKey++;
         if (nextKey >= config.accounts) nextKey = 0;
-        await new Promise(r => setTimeout(r, 1));
+        await new Promise(r => setTimeout(r, 5));
       }
       workerId = await getFreeWorker(config, workerId);
       const nonce = nonceMap.get(nextKey)!;
       reqCounter++;
-      autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, gasPrice, chainId);
+      autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, chainId);
       sendersTxnMap.set(nextKey, sendersTxnMap.get(nextKey)! + 1);
       nextKey++;
       if (nextKey >= config.accounts) nextKey = 0;
       workerId++;
-      counter++;
-      if (counter >= config.transactions) {
-        counter -= workersMap.size;
-        while (workersMap.size > 0) { await new Promise(r => setTimeout(r, 50)); };
-      }
     }
 
-    while (reqErrorsMap.size > 0) await resendAuto(config, workerId, gasLimit, gasPrice, chainId);
+    while (reqErrorsMap.size > 0) await resendAuto(config, workerId, gasLimit, chainId);
 
     while (txPoolLength > 0) await new Promise(r => setTimeout(r, 100));
 
@@ -703,7 +730,7 @@ const setup = async () => {
   await setupAccounts(config, EVM_TPS_SENDERS_FILE, EVM_TPS_RECEIVERS_FILE);
 
   await checkTokenBalances(config, deployer);
-  await checkETHBalances(config, deployer);
+  if (config.fundSenders) await checkETHBalances(config, deployer);
 
   await updateNonces(config);
   await updateBalances(config);
@@ -725,15 +752,16 @@ const main = async () => {
   txpoolChecker(config);
 
   const gasLimit = ethers.BigNumber.from(config.gasLimit);
-  const gasPrice = await ethers.provider.getGasPrice();
   const chainId = (await ethers.provider.getNetwork()).chainId;
+
+  gasPriceChecker(config);
 
   const app = express();
   app.use(BodyParser.json());
 
   app.get("/auto", async (req: any, res: any) => {
     config = await setup();
-    const [status, msg] = await auto(config, gasLimit, gasPrice, chainId);
+    const [status, msg] = await auto(config, gasLimit, chainId);
     if (status === 0) res.send(msg);
     else res.status(500).send(`Internal error: /auto ${msg}`);
   });
@@ -752,7 +780,7 @@ const main = async () => {
 
     const start = Date.now();
     try {
-      const txHash = await sendRawTransaction(config, k, nonce, gasLimit, gasPrice, chainId);
+      const txHash = await sendRawTransaction(config, k, nonce, gasLimit, chainId);
       const t = Date.now() - start;
       const pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(k, 5)}]`;
       const post = `[nonce: ${nonce} | pool: ${txPoolLength} | time: ${t}]${t > 12000 ? " ***" : ""}`;

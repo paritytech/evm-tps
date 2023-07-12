@@ -16,11 +16,10 @@
   "tokenAmountToMint": 1000000000,
   "tokenTransferMultiplier": 1,
   "tokenAssert": true,
-  "transactions": 30000,
+  "transactions": 50000,
   "gasLimit": "200000",
   "txpoolMaxLength": -1,
   "txpoolMultiplier": 3,
-  "txpoolCheckDelay": 250,
-  "txpoolCheckerDelay": 250,
+  "checkersInterval": 250,
   "estimate": false
 }
