@@ -34,7 +34,8 @@ const nonceMap = new Map<number, number>();
 const receiptsMap = new Map<string, any>();
 
 const workersMap = new Map<number, boolean>();
-const sendersInUseMap = new Map<number, boolean>();
+const sendersBusyMap = new Map<number, boolean>();
+const sendersFreeMap = new Map<number, boolean>();
 const sendersTxnMap = new Map<number, number>();
 const sendersErrMap = new Map<number, number>();
 
@@ -508,7 +509,8 @@ const updateBalances = async (config: TPSConfig) => {
 
 const resetMaps = (config: TPSConfig) => {
   sendersMap.clear();
-  sendersInUseMap.clear();
+  sendersBusyMap.clear();
+  sendersFreeMap.clear();
   sendersTxnMap.clear();
   receiversMap.clear();
   rcvBalances.clear();
@@ -519,6 +521,7 @@ const resetMaps = (config: TPSConfig) => {
   reqErrorsMap.clear();
   initNumberMap(sendersErrMap, config.accounts, 0);
   initNumberMap(sendersTxnMap, config.accounts, 0);
+  initNumberMap(sendersFreeMap, config.accounts, true);
 }
 
 const setupDirs = () => {
@@ -561,7 +564,30 @@ const printNumberMap = (m: Map<number, any>) => {
   return msg;
 }
 
+const getAvailSender = async (config: TPSConfig, key: number) => {
+  const maxTxnPerSender = Math.ceil(config.transactions / config.accounts);
+  key = key === 0 ? key : key + 1;
+  if (key >= config.accounts) key = 0;
+  while (sendersFreeMap.size > 0) {
+    let availKeys = sendersFreeMap.keys();
+    for (let k of availKeys) {
+      if (sendersTxnMap.get(k)! >= maxTxnPerSender) {
+        sendersFreeMap.delete(k);
+        continue;
+      }
+      if (k < key) continue;
+      if (sendersBusyMap.get(k)!) continue;
+      return k;
+    }
+    key++;
+    if (key >= config.accounts) key = 0;
+    await new Promise(r => setTimeout(r, 1));
+  }
+  return -1;
+}
+
 const getFreeWorker = async (config: TPSConfig, workerId: number) => {
+  workerId = workerId === 0 ? workerId : workerId + 1;
   if (workerId >= config.workers) workerId = 0;
   while (workersMap.get(workerId)!) {
     await new Promise(r => setTimeout(r, 1));
@@ -584,8 +610,6 @@ const resendAuto = async (
   gasLimit: BigNumber,
   chainId: number,
 ) => {
-  while (workersMap.size > 0) { await new Promise(r => setTimeout(r, 50)) };
-
   const sendersErrMapCopy = new Map(sendersErrMap);
   sendersErrMap.clear();
 
@@ -604,12 +628,9 @@ const resendAuto = async (
       reqCounter++;
       autoSendRawTransaction(config, workerId, k, nonce, gasLimit, chainId);
       nonce++;
-      workerId++;
     }
     nonceMap.set(k, nonce);
   }
-
-  while (workersMap.size > 0) { await new Promise(r => setTimeout(r, 50)) };
 }
 
 const autoSendRawTransaction = async (
@@ -620,7 +641,7 @@ const autoSendRawTransaction = async (
   gasLimit: BigNumber,
   chainId: number,
 ) => {
-  sendersInUseMap.set(senderKey, true);
+  sendersBusyMap.set(senderKey, true);
   workersMap.set(workerId, true);
 
   const pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(senderKey, 5)}]`;
@@ -650,19 +671,19 @@ const autoSendRawTransaction = async (
   } catch (error: any) {
     sendersErrMap.set(senderKey, sendersErrMap.get(senderKey)! + 1);
     sendersTxnMap.set(senderKey, sendersTxnMap.get(senderKey)! - 1);
+    sendersFreeMap.set(senderKey, true);
     msg = `${pre} auto: ${error.message} ${post}`;
     reqErrorsMap.set(reqErrCounter, msg);
     reqErrCounter++;
   }
 
-  sendersInUseMap.delete(senderKey);
+  sendersBusyMap.delete(senderKey);
   workersMap.delete(workerId);
 }
 
 const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => {
   const staticProvider = new ethers.providers.StaticJsonRpcProvider(config.endpoint, { name: 'tps', chainId });
 
-  let maxTxnPerSender = Math.ceil(config.transactions / config.accounts);
   let status_code = 0;
   let msg = "";
   const start = Date.now();
@@ -683,24 +704,24 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
         return [0, `TOO_MANY_ERRORS: ${reqErrorsMap.size}/${config.transactions} [~${p}%]`];
       }
       await checkTxpool(config);
-      while (sendersInUseMap.get(nextKey)! || sendersTxnMap.get(nextKey)! >= maxTxnPerSender) {
-        nextKey++;
-        if (nextKey >= config.accounts) nextKey = 0;
-        await new Promise(r => setTimeout(r, 5));
-      }
+      nextKey = await getAvailSender(config, nextKey);
+      if (nextKey === -1 || sendersFreeMap.size === 0) break;
       workerId = await getFreeWorker(config, workerId);
       const nonce = nonceMap.get(nextKey)!;
       reqCounter++;
       autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, chainId);
       sendersTxnMap.set(nextKey, sendersTxnMap.get(nextKey)! + 1);
-      nextKey++;
-      if (nextKey >= config.accounts) nextKey = 0;
-      workerId++;
     }
+
+    // Wait till no more running workers.
+    while (workersMap.size > 0) { await new Promise(r => setTimeout(r, 5)) };
 
     while (reqErrorsMap.size > 0) await resendAuto(config, workerId, gasLimit, chainId);
 
     while (txPoolLength > 0) await new Promise(r => setTimeout(r, 100));
+
+    // Wait till no more running workers.
+    while (workersMap.size > 0) { await new Promise(r => setTimeout(r, 5)) };
 
     let tpsResult = await calculateTPS(config, chainId, startingBlock);
     reqErrorsMap.clear();
@@ -770,45 +791,41 @@ const main = async () => {
 
     await checkTxpool(config)
 
-    let k = nextKey;
-    nextKey++;
-    if (nextKey >= config.accounts) nextKey = 0;
+    nextKey = await getAvailSender(config, nextKey);
 
-    const nonce = nonceMap.get(k)!;
+    const nonce = nonceMap.get(nextKey)!;
     let nextNonce = nonce + 1;
-    nonceMap.set(k, nextNonce);
+    nonceMap.set(nextKey, nextNonce);
 
     const start = Date.now();
     try {
-      const txHash = await sendRawTransaction(config, k, nonce, gasLimit, chainId);
+      const txHash = await sendRawTransaction(config, nextKey, nonce, gasLimit, chainId);
       const t = Date.now() - start;
-      const pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(k, 5)}]`;
+      const pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(nextKey, 5)}]`;
       const post = `[nonce: ${nonce} | pool: ${txPoolLength} | time: ${t}]${t > 12000 ? " ***" : ""}`;
       const msg = `${pre} sendRawTransaction: ${txHash} ${post}`;
       reqCounter++;
       console.log(msg);
       res.send(msg);
     } catch (error: any) {
-      console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(k, 5)}] sendRawTransaction: ${error.message}`);
+      console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(nextKey, 5)}] sendRawTransaction: ${error.message}`);
       res.status(500).send(`Internal error: /sendRawTransaction ${error.message}`);
     }
   });
 
   app.get("/getBlock", async (req: any, res: any) => {
-    let k = nextKey;
-    nextKey++;
-    if (nextKey >= config.accounts) nextKey = 0;
+    nextKey = await getAvailSender(config, nextKey);
     try {
       const start = Date.now();
-      const sender = sendersMap.get(k)!;
+      const sender = sendersMap.get(nextKey)!;
       let b = await sender.provider.getBlock("latest");
       const t = Date.now() - start;
-      const msg = `[req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(k, 5)}] getBlock: [b: ${b.number} | t: ${t}]${t > 12000 ? " ***" : ""}`;
+      const msg = `[req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(nextKey, 5)}] getBlock: [b: ${b.number} | t: ${t}]${t > 12000 ? " ***" : ""}`;
       reqCounter++;
       console.log(msg);
       res.send(msg);
     } catch (error: any) {
-      console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(k, 5)}] getBlock: ${error.message}`);
+      console.error(`[ERROR][req: ${zeroPad(reqCounter, 5)}][acc: ${zeroPad(nextKey, 5)}] getBlock: ${error.message}`);
       res.status(500).send(`Internal error: /getBlock ${error.message}`);
     }
   });
