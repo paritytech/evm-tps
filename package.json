@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "evm": "npx hardhat run scripts/evm-tps-server.ts",
+    "substrate": "npx hardhat run scripts/substrate-tps-server.ts"
   },
   "author": "",
   "license": "ISC",
@@ -33,6 +35,8 @@
     "typescript": ">=4.5.0"
   },
   "dependencies": {
+    "@polkadot/api": "^10.9.1",
+    "@polkadot/keyring": "^12.3.2",
     "body-parser": "^1.20.2",
     "express": "^4.18.2"
   }
