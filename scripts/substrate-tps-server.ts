@@ -61,6 +61,7 @@ let reqErrCounter = 0;
 let nextKey = 0;
 let lastTxHash = "";
 let hardstop = false;
+let inherentExtrinsics = 0;
 
 class SubstrateApi {
   wsEndpoint: string;
@@ -179,11 +180,26 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
 const setTxpool = async (config: TPSConfig) => {
   if (config.txpoolMaxLength === -1) {
     // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
+    let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
+    const api = await substrateApi.get(config);
+    // @ts-ignore
+    let blockWeights = api.consts.system.blockWeights.maxBlock.refTime;
     console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
-    let maxTxnMultiplier = 2000 * config.txpoolMultiplier;
+    console.log(`[Txpool] Block Max Weights: ${blockWeights.toHuman()}`);
+    const xt = api.tx.balances.transfer(config.deployer.address, 1_000);
+    let { partialFee: fee } = await xt.paymentInfo(deployer);
+    console.log(`[Txpool] Extrinsic Weight : ${fee.toHuman()}`);
+    blockWeights = blockWeights.toNumber() * 0.75;
+    let max_txn_block = blockWeights / fee.toNumber();
+    console.log(`[Txpool] Max xts per Block: ${max_txn_block}`);
+    let maxTxnMultiplier = max_txn_block * config.txpoolMultiplier;
     if (maxTxnMultiplier > 5000) config.txpoolMaxLength = Math.round(maxTxnMultiplier / 1000) * 1000;
     else config.txpoolMaxLength = maxTxnMultiplier;
     console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
+    if (config.txpoolMaxLength > 8192) {
+      config.txpoolMaxLength = 7500;
+      console.log(`[Txpool] Using default    : ${config.txpoolMaxLength}`);
+    }
   }
   return config;
 }
@@ -297,12 +313,12 @@ const receiptsFetcher = async (config: TPSConfig) => {
     try {
       let { block } = await waitForResponse(config, "chain_getBlock", [], 250, 1);
       if (block.header.number != blockNumber) {
-        let receipts = [];
+        let extrinsics = [];
         for (let xtHash of block.extrinsics) {
-          receipts.push(blake2AsHex(xtHash));
+          extrinsics.push(blake2AsHex(xtHash));
         }
-        console.log(`[ReceiptsFetcher] Got ${receipts.length} receipts from block ${parseInt(block.header.number, 16)} [fee: ${printGasPrice(chainFee)} | pool: ${txPoolLength}]`);
-        for (let r of receipts) {
+        console.log(`[ReceiptsFetcher] Got ${extrinsics.length} extrinsics from block ${parseInt(block.header.number, 16)} [fee: ${printGasPrice(chainFee)} | pool: ${txPoolLength}]`);
+        for (let r of extrinsics) {
           // Storing just (hash, status) to save memory.
           receiptsMap.set(r, 1);
         }
@@ -453,16 +469,16 @@ const setupDirs = () => {
 const calculateTPS = async (config: TPSConfig, startingBlock: SimpleBlock) => {
   const api = await substrateApi.get(config);
 
-  let lastBlock = await getBlockWithExtras(api, config, null);
+  let lastBlock = await getBlockWithExtras(api, null);
 
   let lastBlockNumber = lastBlock.number;
-  while (lastBlock.extrinsics.length > 1 || lastBlock.number === startingBlock.number) {
+  while (lastBlock.extrinsics.length > inherentExtrinsics || lastBlock.number === startingBlock.number) {
     lastBlockNumber = lastBlock.number;
     await new Promise(r => setTimeout(r, 200));
-    lastBlock = await getBlockWithExtras(api, config, null);
+    lastBlock = await getBlockWithExtras(api, null);
   }
 
-  lastBlock = await getBlockWithExtras(api, config, lastBlockNumber);
+  lastBlock = await getBlockWithExtras(api, lastBlockNumber);
 
   let t = lastBlock.timestamp - startingBlock.timestamp;
   let err = `[errors=${reqErrorsMap.size}]`;
@@ -481,7 +497,7 @@ const printNumberMap = (m: Map<number, any>) => {
   return msg;
 }
 
-const getBlockWithExtras = async (api: ApiPromise, config: TPSConfig, number: number | null): Promise<SimpleBlock> => {
+const getBlockWithExtras = async (api: ApiPromise, number: number | null): Promise<SimpleBlock> => {
   let hash, block, timestamp;
   if (number) {
     hash = (await api.rpc.chain.getBlockHash(number)!);
@@ -618,7 +634,7 @@ const auto = async (config: TPSConfig) => {
   let workerId = 0;
   try {
     const api = await substrateApi.get(config);
-    let startingBlock = await getBlockWithExtras(api, config, null);
+    let startingBlock = await getBlockWithExtras(api, null);
     let initialCounter = reqCounter;
 
     while ((reqCounter - initialCounter) < config.transactions) {
@@ -686,6 +702,10 @@ const setup = async () => {
   }
 
   await setupAccounts(config, EVM_TPS_SENDERS_FILE, EVM_TPS_RECEIVERS_FILE);
+
+  const api = await substrateApi.get(config);
+  let block = await getBlockWithExtras(api, null);
+  inherentExtrinsics = block.extrinsics.length;
 
   if (config.fundSenders) await checkBalances(config, deployer);
 
