@@ -21,5 +21,6 @@
   "txpoolMaxLength": -1,
   "txpoolMultiplier": 3,
   "checkersInterval": 250,
-  "estimate": false
+  "estimate": false,
+  "verbose": false
 }

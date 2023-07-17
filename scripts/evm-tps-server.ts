@@ -81,6 +81,7 @@ interface TPSConfig {
   checkersInterval: number;
   estimate: boolean | undefined;
   payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
+  verbose: boolean;
 }
 
 interface UnsignedTx {
@@ -137,6 +138,7 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     checkersInterval: 250,
     estimate: false,
     payloads: undefined,
+    verbose: false,
   };
 
   if (fs.existsSync(configFilename)) {
@@ -365,7 +367,7 @@ const sendRawTransaction = async (
   return txHash;
 }
 
-const receiptsFetcher = async (config: TPSConfig) => {
+const blockTracker = async (config: TPSConfig) => {
   let blockNumber = 0;
   while (1) {
 
@@ -384,11 +386,17 @@ const receiptsFetcher = async (config: TPSConfig) => {
           }
         }
         if (receipts === undefined) throw Error(`Not able to fetch receipts using parity_getBlockReceipts for ${block.number}!`);
-        console.log(`[ReceiptsFetcher] Got ${receipts.length} receipts from block ${parseInt(block.number, 16)} [gasPrice: ${printGasPrice(chainGasPrice)} | pool: ${txPoolLength}]`);
         for (let r of receipts) {
           // Storing just (hash, status) to save memory.
           receiptsMap.set(r.transactionHash, r.status);
         }
+        const ratio = Math.round((block.gasUsed / block.gasLimit) * 100);
+        let msg = `[BlockTracker] Block: ${zeroPad(parseInt(block.number, 16), 4)} | `;
+        msg += `txns: ${zeroPad(receipts.length, 4)} | `;
+        msg += `gasUsed: ${zeroPad(parseInt(block.gasUsed, 16), 9)} (~${zeroPad(ratio, 3)}%) `;
+        msg += `[gasPrice: ${printGasPrice(chainGasPrice)} | pool: ${zeroPad(txPoolLength, 5)}]`;
+        if (lastTxHash && !config.verbose) msg += ` -> txHash: ${lastTxHash} `;
+        console.log(msg);
       }
       blockNumber = block.number;
     } catch { }
@@ -522,6 +530,7 @@ const resetMaps = (config: TPSConfig) => {
   initNumberMap(sendersErrMap, config.accounts, 0);
   initNumberMap(sendersTxnMap, config.accounts, 0);
   initNumberMap(sendersFreeMap, config.accounts, true);
+  lastTxHash = "";
 }
 
 const setupDirs = () => {
@@ -658,7 +667,7 @@ const autoSendRawTransaction = async (
       const t = Date.now() - start;
       const postWithTime = `${post} [time: ${zeroPad(t, 5)}${t > 12000 ? " ***" : ""}]`;
       msg = `${pre} auto: ${txHash} ${postWithTime}`;
-      console.log(msg);
+      if (config.verbose) console.log(msg);
 
       lastTxHash = txHash;
       let nextNonce = nonce + 1;
@@ -729,6 +738,8 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
 
     if (config.tokenAssert) await assertTokenBalances(config);
 
+    lastTxHash = "";
+
     let t = Date.now() - start;
     let pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(0, 5)}]`;
     let post = `[wrk: ${zeroPad(workersMap.size, 5)} | pool: ${zeroPad(txPoolLength, 5)} | time: ${zeroPad(t, 5)}]`;
@@ -769,7 +780,7 @@ const main = async () => {
 
   let config = await setup();
 
-  receiptsFetcher(config);
+  blockTracker(config);
   txpoolChecker(config);
 
   const gasLimit = ethers.BigNumber.from(config.gasLimit);

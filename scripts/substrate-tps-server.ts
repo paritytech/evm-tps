@@ -107,6 +107,7 @@ interface TPSConfig {
   checkersInterval: number;
   estimate: boolean | undefined;
   payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
+  verbose: boolean;
 }
 
 interface UnsignedTx {
@@ -165,6 +166,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
     checkersInterval: 250,
     estimate: false,
     payloads: undefined,
+    verbose: false,
   };
 
   if (fs.existsSync(configFilename)) {
@@ -185,13 +187,13 @@ const setTxpool = async (config: TPSConfig) => {
     // @ts-ignore
     let blockWeights = api.consts.system.blockWeights.maxBlock.refTime;
     console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
-    console.log(`[Txpool] Block Max Weights: ${blockWeights.toHuman()}`);
-    const xt = api.tx.balances.transfer(config.deployer.address, 1_000);
+    blockWeights = blockWeights.toNumber() * 0.75;
+    console.log(`[Txpool] Block Max Weights: ${blockWeights}`);
+    const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
     let { partialFee: fee } = await xt.paymentInfo(deployer);
     console.log(`[Txpool] Extrinsic Weight : ${fee.toHuman()}`);
-    blockWeights = blockWeights.toNumber() * 0.75;
     let max_txn_block = blockWeights / fee.toNumber();
-    console.log(`[Txpool] Max xts per Block: ${max_txn_block}`);
+    console.log(`[Txpool] Max xts per Block: ${Math.round(max_txn_block)}`);
     let maxTxnMultiplier = max_txn_block * config.txpoolMultiplier;
     if (maxTxnMultiplier > 5000) config.txpoolMaxLength = Math.round(maxTxnMultiplier / 1000) * 1000;
     else config.txpoolMaxLength = maxTxnMultiplier;
@@ -293,40 +295,38 @@ const batchSendNativeToken = async (config: TPSConfig, deployer: KeyringPair) =>
     // @ts-ignore
     nonce = nonce.add(new BN(1));
   }
-  await getReceiptLocally(txHash!, 200, 60);
+  await getReceiptLocally(txHash!, 500, 60);
 }
 
-const submitExtrinsic = async (api: ApiPromise, config: TPSConfig, k: number, nonce: number) => {
+const submitExtrinsic = async (api: ApiPromise, k: number, nonce: number) => {
   const sender = sendersMap.get(k)!;
   const receiver = receiversMap.get(k)!;
 
-  const txHash = (await api.tx.balances.transfer(receiver.address, 1_000).signAndSend(sender, { nonce })).toString();
+  const txHash = (await api.tx.balances.transferKeepAlive(receiver.publicKey, 1_000).signAndSend(sender, { nonce })).toString();
   if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
   return txHash;
 }
 
-const receiptsFetcher = async (config: TPSConfig) => {
-  let blockNumber = 0;
-  while (1) {
-    if (receiptsMap.size > 10_000) receiptsMap.clear();
-    try {
-      let { block } = await waitForResponse(config, "chain_getBlock", [], 250, 1);
-      if (block.header.number != blockNumber) {
-        let extrinsics = [];
-        for (let xtHash of block.extrinsics) {
-          extrinsics.push(blake2AsHex(xtHash));
-        }
-        console.log(`[ReceiptsFetcher] Got ${extrinsics.length} extrinsics from block ${parseInt(block.header.number, 16)} [fee: ${printGasPrice(chainFee)} | pool: ${txPoolLength}]`);
-        for (let r of extrinsics) {
-          // Storing just (hash, status) to save memory.
-          receiptsMap.set(r, 1);
-        }
-      }
-      blockNumber = block.header.number;
-    } catch { }
-    await new Promise(r => setTimeout(r, config.checkersInterval));
-  }
+const blockTracker = async (config: TPSConfig) => {
+  const api = await substrateApi.get(config);
+  let blockMaxWeights = api.consts.system.blockWeights.maxBlock.refTime;
+  blockMaxWeights = blockMaxWeights.toNumber() * 0.75;
+  const unsubscribe = await api.rpc.chain.subscribeNewHeads(async (header) => {
+    let blockNumber = 0;
+    const block = (await api.rpc.chain.getBlock(header.hash)!).block;
+    if (blockNumber != header.number.toNumber()) {
+      let weight = (await (await api.at(header.hash)).query.system.blockWeight()).normal.refTime.toNumber();
+      let ratio = Math.round((weight / blockMaxWeights) * 100);
+      let msg = `[BlockTracker] Block: ${zeroPad(parseInt(header.number.toString(), 16), 4)} | `;
+      msg += `xts: ${zeroPad(block.extrinsics.length, 4)} | `;
+      msg += `weight: ${zeroPad(weight, 13)} (~${zeroPad(ratio, 3)}%) `;
+      msg += `[fee: ${printGasPrice(chainFee)} | pool: ${zeroPad(txPoolLength, 5)}]`;
+      if (lastTxHash && !config.verbose) msg += ` -> xtHash: ${lastTxHash} `;
+      console.log(msg);
+      blockNumber = header.number.toNumber();
+    }
+  });
 }
 
 const getReceiptLocally = async (txnHash: string, delay: number, retries: number) => {
@@ -366,7 +366,7 @@ const txpoolChecker = async (config: TPSConfig) => {
 const feeChecker = async (config: TPSConfig) => {
   const api = await substrateApi.get(config);
   let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
-  const xt = api.tx.balances.transfer(deployer.address, 1_000);
+  const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
   while (1) {
     try {
       let { partialFee: fee } = await xt.paymentInfo(deployer);
@@ -453,6 +453,7 @@ const resetMaps = (config: TPSConfig) => {
   initNumberMap(sendersErrMap, config.accounts, 0);
   initNumberMap(sendersTxnMap, config.accounts, 0);
   initNumberMap(sendersFreeMap, config.accounts, true);
+  lastTxHash = "";
 }
 
 const setupDirs = () => {
@@ -599,12 +600,12 @@ const autoSendRawTransaction = async (
 
   const start = Date.now();
   try {
-    const txHash = await submitExtrinsic(api, config, senderKey, nonce);
+    const txHash = await submitExtrinsic(api, senderKey, nonce);
     if (validTxHash(txHash)) {
       const t = Date.now() - start;
       const postWithTime = `${post} [time: ${zeroPad(t, 5)}${t > 12000 ? " ***" : ""}]`;
       msg = `${pre} auto: ${txHash} ${postWithTime}`;
-      console.log(msg);
+      if (config.verbose) console.log(msg);
 
       lastTxHash = txHash;
       let nextNonce = nonce + 1;
@@ -674,6 +675,8 @@ const auto = async (config: TPSConfig) => {
 
     if (config.tokenAssert) await assertTokenBalances(config);
 
+    lastTxHash = "";
+
     let t = Date.now() - start;
     let pre = `[req: ${zeroPad(reqCounter, 5)}][addr: ${zeroPad(0, 5)}]`;
     let post = `[wrk: ${zeroPad(workersMap.size, 5)} | pool: ${zeroPad(txPoolLength, 5)} | time: ${zeroPad(t, 5)}]`;
@@ -725,7 +728,7 @@ const main = async () => {
 
   let config = await setup();
 
-  receiptsFetcher(config);
+  blockTracker(config);
   txpoolChecker(config);
 
   feeChecker(config);
