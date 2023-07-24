@@ -179,10 +179,9 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
   return config;
 }
 
-const setTxpool = async (config: TPSConfig) => {
+const setTxpool = async (config: TPSConfig, deployer: KeyringPair) => {
   if (config.txpoolMaxLength === -1) {
     // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
-    let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
     const api = await substrateApi.get(config);
     // @ts-ignore
     let blockWeights = api.consts.system.blockWeights.maxBlock.refTime;
@@ -310,12 +309,14 @@ const submitExtrinsic = async (api: ApiPromise, k: number, nonce: number) => {
 
 const blockTracker = async (config: TPSConfig) => {
   const api = await substrateApi.get(config);
+  // @ts-ignore
   let blockMaxWeights = api.consts.system.blockWeights.maxBlock.refTime;
   blockMaxWeights = blockMaxWeights.toNumber() * 0.75;
   const unsubscribe = await api.rpc.chain.subscribeNewHeads(async (header) => {
     let blockNumber = 0;
     const block = (await api.rpc.chain.getBlock(header.hash)!).block;
     if (blockNumber != header.number.toNumber()) {
+      // @ts-ignore
       let weight = (await (await api.at(header.hash)).query.system.blockWeight()).normal.refTime.toNumber();
       let ratio = Math.round((weight / blockMaxWeights) * 100);
       let msg = `[BlockTracker] Block: ${zeroPad(parseInt(header.number.toString(), 16), 4)} | `;
@@ -715,7 +716,7 @@ const setup = async () => {
   await updateNonces(config);
   await updateBalances(config);
 
-  config = await setTxpool(config);
+  config = await setTxpool(config, deployer);
 
   console.log(JSON.stringify(config, null, 2));
 
@@ -738,6 +739,7 @@ const main = async () => {
 
   app.get("/auto", async (req: any, res: any) => {
     config = await setup();
+    console.log(`[Server] Running auto()...`);
     const [status, msg] = await auto(config);
     if (status === 0) res.send(msg);
     else res.status(500).send(`Internal error: /auto ${msg}`);

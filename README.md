@@ -38,7 +38,8 @@ Change test's parameters in [data/config.json](./data/config.json):
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
     "checkersInterval": 250,
-    "estimate": false
+    "estimate": false,
+    "verbose": false
 }
 ```
 
@@ -67,7 +68,8 @@ Change test's parameters in [data/config.json](./data/config.json):
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
     "checkersInterval": 250,
-    "estimate": false
+    "estimate": false,
+    "verbose": false
 }
 ```
 
@@ -98,6 +100,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "txpoolMultiplier": 3,
     "checkersInterval": 250,
     "estimate": false,
+    "verbose": false,
     "payloads": [
         {
             "data": "0xa9059cbb000000000000000000000000ea8d69db60401a766e1083beba3a34cafa13151c0000000000000000000000000000000000000000000000000000000000000001",
@@ -134,6 +137,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "txpoolMultiplier": 3,
     "checkersInterval": 250,
     "estimate": false,
+    "verbose": false,
     "payloads": [
         {
             "from": "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b",
