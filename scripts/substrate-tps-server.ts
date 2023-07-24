@@ -128,9 +128,10 @@ const readJSON = async (filename: string) => {
 
 const getDeployer = async (configFilename: string) => {
   await cryptoWaitReady();
-  const keyring = new Keyring({ type: 'sr25519' });
+  let keyring = new Keyring({ type: 'sr25519' });
   try {
     const config = await readJSON(configFilename);
+    if (config.variant === 'frontier') keyring = new Keyring({ type: 'ethereum' });
     return keyring.createFromUri(config.deployer.privateKey);
   } catch (_) {
     return keyring.createFromUri(ethers.Wallet.createRandom().privateKey);
@@ -212,7 +213,8 @@ const setupAccounts = async (
 ) => {
 
   await cryptoWaitReady();
-  const keyring = new Keyring({ type: 'sr25519' });
+  let keyring = new Keyring({ type: 'sr25519' });
+  if (config.variant === 'frontier') keyring = new Keyring({ type: 'ethereum' });
 
   let account: KeyringPair | null = null;
   try {
@@ -301,7 +303,7 @@ const submitExtrinsic = async (api: ApiPromise, k: number, nonce: number) => {
   const sender = sendersMap.get(k)!;
   const receiver = receiversMap.get(k)!;
 
-  const txHash = (await api.tx.balances.transferKeepAlive(receiver.publicKey, 1_000).signAndSend(sender, { nonce })).toString();
+  const txHash = (await api.tx.balances.transferKeepAlive(receiver.address, 1_000).signAndSend(sender, { nonce })).toString();
   if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
   return txHash;
@@ -312,14 +314,14 @@ const blockTracker = async (config: TPSConfig) => {
   // @ts-ignore
   let blockMaxWeights = api.consts.system.blockWeights.maxBlock.refTime;
   blockMaxWeights = blockMaxWeights.toNumber() * 0.75;
+  let blockNumber = 0;
   const unsubscribe = await api.rpc.chain.subscribeNewHeads(async (header) => {
-    let blockNumber = 0;
-    const block = (await api.rpc.chain.getBlock(header.hash)!).block;
     if (blockNumber != header.number.toNumber()) {
+      const block = (await api.rpc.chain.getBlock(header.hash)!).block;
       // @ts-ignore
       let weight = (await (await api.at(header.hash)).query.system.blockWeight()).normal.refTime.toNumber();
       let ratio = Math.round((weight / blockMaxWeights) * 100);
-      let msg = `[BlockTracker] Block: ${zeroPad(parseInt(header.number.toString(), 16), 4)} | `;
+      let msg = `[BlockTracker] Block: ${zeroPad(header.number.toNumber(), 4)} | `;
       msg += `xts: ${zeroPad(block.extrinsics.length, 4)} | `;
       msg += `weight: ${zeroPad(weight, 13)} (~${zeroPad(ratio, 3)}%) `;
       msg += `[fee: ${printGasPrice(chainFee)} | pool: ${zeroPad(txPoolLength, 5)}]`;
