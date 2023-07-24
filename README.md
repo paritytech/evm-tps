@@ -37,6 +37,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
+    "txpoolLimit": 7500,
     "checkersInterval": 250,
     "estimate": false,
     "verbose": false
@@ -67,6 +68,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
+    "txpoolLimit": 7500,
     "checkersInterval": 250,
     "estimate": false,
     "verbose": false
@@ -98,6 +100,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
+    "txpoolLimit": 7500,
     "checkersInterval": 250,
     "estimate": false,
     "verbose": false,
@@ -135,6 +138,7 @@ Change test's parameters in [data/config.json](./data/config.json):
     "gasLimit": "200000",
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
+    "txpoolLimit": 7500,
     "checkersInterval": 250,
     "estimate": false,
     "verbose": false,

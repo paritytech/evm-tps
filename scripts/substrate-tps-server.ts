@@ -104,6 +104,7 @@ interface TPSConfig {
   gasLimit: string;
   txpoolMaxLength: number;
   txpoolMultiplier: number;
+  txpoolLimit: number;
   checkersInterval: number;
   estimate: boolean | undefined;
   payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
@@ -164,6 +165,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
     gasLimit: "200000",
     txpoolMaxLength: -1,
     txpoolMultiplier: 2,
+    txpoolLimit: 7500,
     checkersInterval: 250,
     estimate: false,
     payloads: undefined,
@@ -185,22 +187,24 @@ const setTxpool = async (config: TPSConfig, deployer: KeyringPair) => {
     // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
     const api = await substrateApi.get(config);
     // @ts-ignore
-    let blockWeights = api.consts.system.blockWeights.maxBlock.refTime;
+    let blockWeight = api.consts.system.blockWeights.maxBlock;
     console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
-    blockWeights = blockWeights.toNumber() * 0.75;
-    console.log(`[Txpool] Block Max Weights: ${blockWeights}`);
+    // @ts-ignore
+    let blockMaxFee = (await api.call.transactionPaymentApi.queryWeightToFee(blockWeight)).toBigInt();
+    blockMaxFee = blockMaxFee * 3n / 4n;
+    console.log(`[Txpool] Block Max Fee    : ${blockMaxFee}`);
     const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
-    let { partialFee: fee } = await xt.paymentInfo(deployer);
-    console.log(`[Txpool] Extrinsic Weight : ${fee.toHuman()}`);
-    let max_txn_block = blockWeights / fee.toNumber();
+    const info = await xt.paymentInfo(deployer);
+    console.log(`[Txpool] Extrinsic Fee    : ${info.partialFee}`);
+    let max_txn_block = parseInt((blockMaxFee / info.partialFee.toBigInt()).toString());
     console.log(`[Txpool] Max xts per Block: ${Math.round(max_txn_block)}`);
     let maxTxnMultiplier = max_txn_block * config.txpoolMultiplier;
     if (maxTxnMultiplier > 5000) config.txpoolMaxLength = Math.round(maxTxnMultiplier / 1000) * 1000;
     else config.txpoolMaxLength = maxTxnMultiplier;
     console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
-    if (config.txpoolMaxLength > 8192) {
-      config.txpoolMaxLength = 7500;
-      console.log(`[Txpool] Using default    : ${config.txpoolMaxLength}`);
+    if (config.txpoolMaxLength > config.txpoolLimit) {
+      config.txpoolMaxLength = config.txpoolLimit;
+      console.log(`[Txpool] Using pool limit : ${config.txpoolMaxLength} ***`);
     }
   }
   return config;

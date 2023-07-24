@@ -78,6 +78,7 @@ interface TPSConfig {
   gasLimit: string;
   txpoolMaxLength: number;
   txpoolMultiplier: number;
+  txpoolLimit: number,
   checkersInterval: number;
   estimate: boolean | undefined;
   payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
@@ -135,6 +136,7 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     gasLimit: "200000",
     txpoolMaxLength: -1,
     txpoolMultiplier: 2,
+    txpoolLimit: 7500,
     checkersInterval: 250,
     estimate: false,
     payloads: undefined,
@@ -210,6 +212,10 @@ const setTxpool = async (config: TPSConfig, deployer: Wallet) => {
     if (maxTxnMultiplier > 5000) config.txpoolMaxLength = Math.round(maxTxnMultiplier / 1000) * 1000;
     else config.txpoolMaxLength = maxTxnMultiplier;
     console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
+    if (config.txpoolMaxLength > config.txpoolLimit) {
+      config.txpoolMaxLength = config.txpoolLimit;
+      console.log(`[Txpool] Using pool limit : ${config.txpoolMaxLength} ***`);
+    }
   }
   return config;
 }
