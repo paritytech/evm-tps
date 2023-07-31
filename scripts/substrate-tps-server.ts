@@ -705,8 +705,9 @@ const setup = async () => {
 
   if (workersAPIMap.size == 0) {
     for (let i = 0; i < config.workers; i++) {
-      const wsProvider = new WsProvider('ws://127.0.0.1:8545');
-      const api = await ApiPromise.create({ provider: wsProvider });
+      // We need an API for each worker
+      const subs = new SubstrateApi('');
+      const api = await subs.get(config);
       workersAPIMap.set(i, api);
     }
   }
