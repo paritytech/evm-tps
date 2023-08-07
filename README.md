@@ -156,6 +156,7 @@ Change test's parameters in [data/config.json](./data/config.json):
 
 1. CI pre funded EVM Account (Frontier)
 ```json
+  "variant": "frontier",
   "deployer": {
     "address": "0x6Be02d1d3665660d22FF9624b7BE0551ee1Ac91b",
     "privateKey": "0x99B3C12287537E38C90A9219D4CB074A89A16E9CDB20BF85728EBD97C343E342"
@@ -164,6 +165,7 @@ Change test's parameters in [data/config.json](./data/config.json):
 
 2. Alith (Substrate/Frontier)
 ```json
+  "variant": "frontier",
   "deployer": {
     "address": "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac",
     "privateKey": "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
@@ -172,6 +174,7 @@ Change test's parameters in [data/config.json](./data/config.json):
 
 3. Alice (Substrate)
 ```json
+  "variant": "substrate",
   "deployer": {
     "address": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
     "privateKey": "0xe5be9a5092b81bca64be81d212e7f2f9eba183bb7a90954f7b76361f6edb5c0a"

@@ -183,30 +183,36 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
 }
 
 const setTxpool = async (config: TPSConfig, deployer: KeyringPair) => {
+  // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
+  const api = await substrateApi.get(config);
+  // @ts-ignore
+  let blockWeight = api.consts.system.blockWeights.maxBlock;
+  console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
+  // @ts-ignore
+  let blockMaxFee = (await api.call.transactionPaymentApi.queryWeightToFee(blockWeight)).toBigInt();
+  blockMaxFee = blockMaxFee * 3n / 4n;
+  console.log(`[Txpool] Block Max Fee    : ${blockMaxFee}`);
+  const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
+  // const xt = api.tx.templatePallet.doSomething2(7);
+  const info = await xt.paymentInfo(deployer);
+  // @ts-ignore
+  const xtFee = (await api.call.transactionPaymentApi.queryWeightToFee(info.weight)).toBigInt();
+  console.log(`[Txpool] Extrinsic Fee    : ${xtFee}`);
+  let max_txn_block = parseInt((blockMaxFee / xtFee).toString());
+  console.log(`[Txpool] Max xts per Block: ${Math.round(max_txn_block)}`);
+
   if (config.txpoolMaxLength === -1) {
-    // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
-    const api = await substrateApi.get(config);
-    // @ts-ignore
-    let blockWeight = api.consts.system.blockWeights.maxBlock;
-    console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
-    // @ts-ignore
-    let blockMaxFee = (await api.call.transactionPaymentApi.queryWeightToFee(blockWeight)).toBigInt();
-    blockMaxFee = blockMaxFee * 3n / 4n;
-    console.log(`[Txpool] Block Max Fee    : ${blockMaxFee}`);
-    const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
-    const info = await xt.paymentInfo(deployer);
-    console.log(`[Txpool] Extrinsic Fee    : ${info.partialFee}`);
-    let max_txn_block = parseInt((blockMaxFee / info.partialFee.toBigInt()).toString());
-    console.log(`[Txpool] Max xts per Block: ${Math.round(max_txn_block)}`);
     let maxTxnMultiplier = max_txn_block * config.txpoolMultiplier;
     if (maxTxnMultiplier > 5000) config.txpoolMaxLength = Math.round(maxTxnMultiplier / 1000) * 1000;
     else config.txpoolMaxLength = maxTxnMultiplier;
-    console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
-    if (config.txpoolMaxLength > config.txpoolLimit) {
-      config.txpoolMaxLength = config.txpoolLimit;
-      console.log(`[Txpool] Using pool limit : ${config.txpoolMaxLength} ***`);
-    }
   }
+
+  console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
+  if (config.txpoolMaxLength > config.txpoolLimit) {
+    config.txpoolMaxLength = config.txpoolLimit;
+    console.log(`[Txpool] Using pool limit : ${config.txpoolMaxLength} ***`);
+  }
+
   return config;
 }
 
@@ -308,6 +314,7 @@ const submitExtrinsic = async (api: ApiPromise, k: number, nonce: number) => {
   const receiver = receiversMap.get(k)!;
 
   const txHash = (await api.tx.balances.transferKeepAlive(receiver.address, 1_000).signAndSend(sender, { nonce })).toString();
+  // const txHash = (await api.tx.templatePallet.doSomething2(7).signAndSend(sender, { nonce })).toString();
   if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
   return txHash;
@@ -374,6 +381,7 @@ const feeChecker = async (config: TPSConfig) => {
   const api = await substrateApi.get(config);
   let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
   const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
+  // const xt = api.tx.templatePallet.doSomething2(7);
   while (1) {
     try {
       let { partialFee: fee } = await xt.paymentInfo(deployer);

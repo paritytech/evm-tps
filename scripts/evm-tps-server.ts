@@ -176,47 +176,50 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
 }
 
 const setTxpool = async (config: TPSConfig, deployer: Wallet) => {
+  let lastBlock = await ethers.provider.getBlock("latest");
+
+  const chainGasPrice = await ethers.provider.getGasPrice();
+  const gasLimit = ethers.BigNumber.from(config.gasLimit);
+
+  let estimateGasTx;
+  if (config.payloads?.length) estimateGasTx = await ethers.provider.estimateGas(config.payloads[0]);
+  else {
+    const receiver = receiversMap.get(0)!;
+    const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.tokenAddress);
+    // @ts-ignore
+    estimateGasTx = await token.estimateGas[config.tokenMethod](
+      config.tokenTransferMultiplier,
+      receiver.address,
+      1,
+      { gasPrice: chainGasPrice.mul(2), gasLimit: lastBlock.gasLimit.mul(2).div(3) }
+    );
+  }
+
+  if (estimateGasTx.gt(gasLimit)) {
+    console.log(`\n[  Gas ] estimateGas > config.gasLimit | ${estimateGasTx} > ${config.gasLimit}`);
+    console.log(`[  Gas ] Updating config.gasLimit: ${estimateGasTx}`);
+    config.gasLimit = estimateGasTx.toString();
+  }
+
+  // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
+  console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
+  console.log(`[Txpool] Block gasLimit   : ${lastBlock.gasLimit}`);
+  console.log(`[Txpool] Txn estimateGas  : ${estimateGasTx}`);
+  let max_txn_block = lastBlock.gasLimit.div(estimateGasTx).toNumber();
+  console.log(`[Txpool] Max txn per Block: ${max_txn_block}`);
+
   if (config.txpoolMaxLength === -1) {
-    let lastBlock = await ethers.provider.getBlock("latest");
-
-    const chainGasPrice = await ethers.provider.getGasPrice();
-    const gasLimit = ethers.BigNumber.from(config.gasLimit);
-
-    let estimateGasTx;
-    if (config.payloads?.length) estimateGasTx = await ethers.provider.estimateGas(config.payloads[0]);
-    else {
-      const receiver = receiversMap.get(0)!;
-      const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.tokenAddress);
-      // @ts-ignore
-      estimateGasTx = await token.estimateGas[config.tokenMethod](
-        config.tokenTransferMultiplier,
-        receiver.address,
-        1,
-        { gasPrice: chainGasPrice.mul(2), gasLimit: lastBlock.gasLimit.mul(2).div(3) }
-      );
-    }
-
-    if (estimateGasTx.gt(gasLimit)) {
-      console.log(`\n[  Gas ] estimateGas > config.gasLimit | ${estimateGasTx} > ${config.gasLimit}`);
-      console.log(`[  Gas ] Updating config.gasLimit: ${estimateGasTx}`);
-      config.gasLimit = estimateGasTx.toString();
-    }
-
-    // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
-    console.log(`\n[Txpool] Trying to get a proper Txpool max length...`);
-    console.log(`[Txpool] Block gasLimit   : ${lastBlock.gasLimit}`);
-    console.log(`[Txpool] Txn estimateGas  : ${estimateGasTx}`);
-    let max_txn_block = lastBlock.gasLimit.div(estimateGasTx).toNumber();
-    console.log(`[Txpool] Max txn per Block: ${max_txn_block}`);
     let maxTxnMultiplier = max_txn_block * config.txpoolMultiplier;
     if (maxTxnMultiplier > 5000) config.txpoolMaxLength = Math.round(maxTxnMultiplier / 1000) * 1000;
     else config.txpoolMaxLength = maxTxnMultiplier;
-    console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
-    if (config.txpoolMaxLength > config.txpoolLimit) {
-      config.txpoolMaxLength = config.txpoolLimit;
-      console.log(`[Txpool] Using pool limit : ${config.txpoolMaxLength} ***`);
-    }
   }
+
+  console.log(`[Txpool] Max length       : ${config.txpoolMaxLength}`);
+  if (config.txpoolMaxLength > config.txpoolLimit) {
+    config.txpoolMaxLength = config.txpoolLimit;
+    console.log(`[Txpool] Using pool limit : ${config.txpoolMaxLength} ***`);
+  }
+
   return config;
 }
 
