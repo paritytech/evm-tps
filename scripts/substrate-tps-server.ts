@@ -359,19 +359,10 @@ const getReceiptLocally = async (txnHash: string, delay: number, retries: number
 
 const txpoolChecker = async (config: TPSConfig) => {
   let method = "author_pendingExtrinsics";
-  if (config.variant === "geth") method = "txpool_content";
-  else if (config.variant === "parity") method = "parity_pendingTransactions";
-
   while (1) {
     try {
       let result = await waitForResponse(config, method, [], 250, 1);
-      if (config.variant === "geth") {
-        let pending: any = [];
-        for (let k of Object.keys(result.pending)) {
-          pending = pending.concat(Object.keys(result.pending[k]));
-        }
-        txPoolLength = pending.length;
-      } else txPoolLength = result.length;
+      txPoolLength = result.length;
     } catch { txPoolLength = -1; }
     await new Promise(r => setTimeout(r, config.checkersInterval));
   }
