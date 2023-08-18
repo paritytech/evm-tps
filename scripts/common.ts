@@ -9,6 +9,5 @@ export const deploy = async (deployer: Wallet | SignerWithAddress) => {
     let tx = await token.deployed();
     console.log(`SimpleToken deployed to ${token.address}`);
     await token.deployTransaction.wait();
-    console.log(`Done`);
     return token;
 }
