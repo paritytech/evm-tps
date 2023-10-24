@@ -30,8 +30,8 @@ interface SimpleBlock {
 }
 
 interface Balances {
-  before: number,
-  after: number,
+  before: string,
+  after: string,
 }
 
 // Map from key-id to the private key
@@ -91,6 +91,7 @@ interface TPSConfig {
     privateKey: string,
   },
   fundSenders: boolean,
+  fundAmount: string;
   accounts: number,
   workers: number,
   sendRawTransaction: boolean;
@@ -98,6 +99,7 @@ interface TPSConfig {
   tokenAddress: string;
   tokenMethod: string;
   tokenAmountToMint: number;
+  tokenAmountToSend: number;
   tokenTransferMultiplier: number;
   tokenAssert: boolean | undefined;
   transactions: number,
@@ -152,6 +154,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
       privateKey: deployer.address,
     },
     fundSenders: true,
+    fundAmount: "1000000000000000000",
     accounts: 100,
     workers: 80,
     sendRawTransaction: true,
@@ -159,6 +162,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
     tokenAddress: "",
     tokenMethod: "transferLoop",
     tokenAmountToMint: 1_000_000_000,
+    tokenAmountToSend: 1_000,
     tokenTransferMultiplier: 1,
     tokenAssert: true,
     transactions: 30_000,
@@ -192,8 +196,8 @@ const setTxpool = async (config: TPSConfig, deployer: KeyringPair) => {
   let blockMaxFee = (await api.call.transactionPaymentApi.queryWeightToFee(blockWeight)).toBigInt();
   blockMaxFee = blockMaxFee * 3n / 4n;
   console.log(`[Txpool] Block Max Fee    : ${blockMaxFee}`);
-  const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
-  // const xt = api.tx.templatePallet.doSomething2(7);
+  const amount = new BN(config.tokenAmountToSend);
+  const xt = api.tx.balances.transferKeepAlive(deployer.address, amount.toString());
   const info = await xt.paymentInfo(deployer);
   // @ts-ignore
   const xtFee = (await api.call.transactionPaymentApi.queryWeightToFee(info.weight)).toBigInt();
@@ -299,7 +303,8 @@ const batchSendNativeToken = async (config: TPSConfig, deployer: KeyringPair) =>
   let txHash;
   for (let k = 0; k < sendersMap.size; k++) {
     const sender = sendersMap.get(k)!;
-    txHash = (await api.tx.balances.transfer(sender.address, 1_000_000_000_000_000).signAndSend(deployer, { nonce })).toString();
+    const amount = new BN(config.fundAmount);
+    txHash = (await api.tx.balances.transferKeepAlive(sender.address, amount.toString()).signAndSend(deployer, { nonce })).toString();
     if (!validTxHash(txHash)) throw Error(`[ERROR] batchSendNativeToken() -> ${JSON.stringify(txHash)}`);
     console.log(`[batchSendNativeToken] Sending Native Token to ${sender.address} -> ${txHash}`);
     if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
@@ -309,12 +314,11 @@ const batchSendNativeToken = async (config: TPSConfig, deployer: KeyringPair) =>
   await getReceiptLocally(txHash!, 500, 60);
 }
 
-const submitExtrinsic = async (api: ApiPromise, k: number, nonce: number) => {
+const submitExtrinsic = async (api: ApiPromise, k: number, amount: string, nonce: number) => {
   const sender = sendersMap.get(k)!;
   const receiver = receiversMap.get(k)!;
 
-  const txHash = (await api.tx.balances.transferKeepAlive(receiver.address, 1_000).signAndSend(sender, { nonce })).toString();
-  // const txHash = (await api.tx.templatePallet.doSomething2(7).signAndSend(sender, { nonce })).toString();
+  const txHash = (await api.tx.balances.transferKeepAlive(receiver.address, amount).signAndSend(sender, { nonce })).toString();
   if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
   return txHash;
@@ -372,7 +376,6 @@ const feeChecker = async (config: TPSConfig) => {
   const api = await substrateApi.get(config);
   let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
   const xt = api.tx.balances.transferKeepAlive(deployer.address, 1_000);
-  // const xt = api.tx.templatePallet.doSomething2(7);
   while (1) {
     try {
       let { partialFee: fee } = await xt.paymentInfo(deployer);
@@ -415,7 +418,7 @@ const assertTokenBalances = async (config: TPSConfig) => {
     const receiver = receiversMap.get(k)!;
     // @ts-ignore
     let { data: { free: amount } } = await api.query.system.account(receiver.address);
-    const ok = amounts.after === amount.toNumber();
+    const ok = amounts.after === amount.toString();
     if (!ok) diffs++;
   }
   if (diffs > 0) console.log(`[assertTokenBalances][ERROR] Balance is different for ${diffs} receivers. ***`);
@@ -439,7 +442,7 @@ const updateBalances = async (config: TPSConfig) => {
     // @ts-ignore
     let { data: { free: balance } } = await api.query.system.account(receiver.address);
     console.log(`[updateBalances] ${receiver.address} -> ${balance}`);
-    rcvBalances.set(k, { before: balance.toNumber(), after: balance.toNumber() });
+    rcvBalances.set(k, { before: balance.toString(), after: balance.toString() });
   }
 }
 
@@ -606,7 +609,7 @@ const autoSendRawTransaction = async (
 
   const start = Date.now();
   try {
-    const txHash = await submitExtrinsic(api, senderKey, nonce);
+    const txHash = await submitExtrinsic(api, senderKey, config.tokenAmountToSend.toString(), nonce);
     if (validTxHash(txHash)) {
       const t = Date.now() - start;
       const postWithTime = `${post} [time: ${zeroPad(t, 5)}${t > 12000 ? " ***" : ""}]`;
@@ -618,8 +621,8 @@ const autoSendRawTransaction = async (
       nonceMap.set(senderKey, nextNonce);
 
       let amounts = rcvBalances.get(senderKey)!;
-      amounts.after += 1_000;
-      rcvBalances.set(senderKey, amounts);
+      let amount = new BN(config.tokenAmountToSend).add(new BN(amounts.after));
+      rcvBalances.set(senderKey, { ...amounts, after: amount.toString() });
     } else { throw Error(`Invalid txHash: ${txHash}`) }
   } catch (error: any) {
     sendersErrMap.set(senderKey, sendersErrMap.get(senderKey)! + 1);
