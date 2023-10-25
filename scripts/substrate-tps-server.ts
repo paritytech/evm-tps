@@ -306,7 +306,7 @@ const batchMintNfts = async (config: TPSConfig, deployer: KeyringPair) => {
     const sender = sendersMap.get(k)!;
     txHash = (await api.tx.nfts.mint(0, k, sender, null).signAndSend(deployer, { nonce })).toString();
     if (!validTxHash(txHash)) throw Error(`[ERROR] batchSendNativeToken() -> ${JSON.stringify(txHash)}`);
-    console.log(`[batchSendNativeToken] Sending Native Token to ${sender.address} -> ${txHash}`);
+    console.log(`[batchSendNativeToken] Minting Nft ${k} to ${sender.address} -> ${txHash}`);
     if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
     // @ts-ignore
     nonce = nonce.add(new BN(1));
