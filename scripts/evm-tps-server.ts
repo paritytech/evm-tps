@@ -53,7 +53,22 @@ let nextKey = 0;
 let lastTxHash = "";
 let hardstop = false;
 
-const zeroPad = (num: number, places: number) => String(num).padStart(places, '0')
+const zeroPad = (num: number, places: number) => String(num).padStart(places, '0');
+
+interface Funding {
+  senders: boolean,
+  amount: string,
+  mint: number,
+}
+
+interface Transaction {
+  addressOrPallet: string,
+  method: string,
+  amountIdx: number,
+  params: Array<any>,
+  gasLimit: string,
+  quantity: number,
+}
 
 interface TPSConfig {
   tpsServerHost: string,
@@ -64,23 +79,16 @@ interface TPSConfig {
     address: string,
     privateKey: string,
   },
-  fundSenders: boolean,
   accounts: number,
   workers: number,
-  sendRawTransaction: boolean;
-  timeout: number,
-  tokenAddress: string;
-  tokenMethod: string;
-  tokenAmountToMint: number;
-  tokenTransferMultiplier: number;
-  tokenAssert: boolean | undefined;
-  transactions: number,
-  gasLimit: string;
+  funding: Funding,
+  txn: Transaction,
   txpoolMaxLength: number;
   txpoolMultiplier: number;
   txpoolLimit: number,
   checkersInterval: number;
   estimate: boolean | undefined;
+  timeout: number,
   payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
   verbose: boolean;
 }
@@ -122,23 +130,28 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
       address: deployer.address,
       privateKey: deployer.privateKey,
     },
-    fundSenders: true,
     accounts: 100,
     workers: 80,
-    sendRawTransaction: true,
-    timeout: 5000,
-    tokenAddress: "",
-    tokenMethod: "transferLoop",
-    tokenAmountToMint: 1_000_000_000,
-    tokenTransferMultiplier: 1,
-    tokenAssert: true,
-    transactions: 30_000,
-    gasLimit: "200000",
+    funding: {
+      senders: true,
+      amount: "1000000000000000000000",
+      mint: 1_000_000_000
+    },
+    txn: {
+      addressOrPallet: "",
+      method: "transferLoop",
+      amountIdx: 2,
+      // (n, to, amount)
+      params: [1, "<ACCOUNT>", 1],
+      gasLimit: "200000",
+      quantity: 5000
+    },
     txpoolMaxLength: -1,
     txpoolMultiplier: 2,
     txpoolLimit: 7500,
     checkersInterval: 250,
     estimate: false,
+    timeout: 5000,
     payloads: undefined,
     verbose: false,
   };
@@ -148,12 +161,12 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     config = { ...config, ...fromJSON };
   }
 
-  const gasLimit = ethers.BigNumber.from(config.gasLimit);
+  const gasLimit = ethers.BigNumber.from(config.txn.gasLimit);
 
   chainGasPrice = await ethers.provider.getGasPrice();
   if (chainGasPrice.mul(2).gt(gasPrice)) gasPrice = chainGasPrice.mul(2);
 
-  let tokenAddress = config.tokenAddress || "";
+  let tokenAddress = config.txn.addressOrPallet || "";
   if (tokenAddress === "" && config.payloads?.length) tokenAddress = config.payloads[0].to ? config.payloads[0].to : tokenAddress;
 
   if (tokenAddress !== "") {
@@ -165,9 +178,9 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     const token = await deploy(deployer);
     let tx = await token.start({ gasLimit, gasPrice });
     await tx.wait();
-    tx = await token.mintTo(deployer.address, config.tokenAmountToMint);
+    tx = await token.mintTo(deployer.address, config.funding.mint);
     await tx.wait();
-    config.tokenAddress = token.address;
+    config.txn.addressOrPallet = token.address;
   }
 
   await promisify(fs.writeFile)(configFilename, JSON.stringify(config, null, 2));
@@ -179,26 +192,25 @@ const setTxpool = async (config: TPSConfig, deployer: Wallet) => {
   let lastBlock = await ethers.provider.getBlock("latest");
 
   const chainGasPrice = await ethers.provider.getGasPrice();
-  const gasLimit = ethers.BigNumber.from(config.gasLimit);
+  const gasLimit = ethers.BigNumber.from(config.txn.gasLimit);
 
   let estimateGasTx;
   if (config.payloads?.length) estimateGasTx = await ethers.provider.estimateGas(config.payloads[0]);
   else {
     const receiver = receiversMap.get(0)!;
-    const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.tokenAddress);
+    const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.txn.addressOrPallet);
+    const params = config.txn.params.map(p => p == "<ACCOUNT>" ? receiver.address : p);
     // @ts-ignore
-    estimateGasTx = await token.estimateGas[config.tokenMethod](
-      config.tokenTransferMultiplier,
-      receiver.address,
-      1,
+    estimateGasTx = await token.estimateGas[config.txn.method](
+      ...params,
       { gasPrice: chainGasPrice.mul(2), gasLimit: lastBlock.gasLimit.mul(2).div(3) }
     );
   }
 
   if (estimateGasTx.gt(gasLimit)) {
-    console.log(`\n[  Gas ] estimateGas > config.gasLimit | ${estimateGasTx} > ${config.gasLimit}`);
+    console.log(`\n[  Gas ] estimateGas > config.gasLimit | ${estimateGasTx} > ${config.txn.gasLimit}`);
     console.log(`[  Gas ] Updating config.gasLimit: ${estimateGasTx}`);
-    config.gasLimit = estimateGasTx.toString();
+    config.txn.gasLimit = estimateGasTx.toString();
   }
 
   // We pre calculate the max txn per block we can get and set the txpool max size to * txpoolMultiplier of it.
@@ -298,7 +310,7 @@ const waitForResponse = async (config: TPSConfig, method: string, params: any[],
 }
 
 const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
-  const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.tokenAddress);
+  const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.txn.addressOrPallet);
 
   const gasLimit = ethers.BigNumber.from("1000000");
   const chainId = await deployer.getChainId();
@@ -308,7 +320,7 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
   let txHash;
   for (let k = 0; k < sendersMap.size; k++) {
     const sender = sendersMap.get(k)!;
-    let unsigned = await token.populateTransaction.mintTo(sender.address, config.tokenAmountToMint);
+    let unsigned = await token.populateTransaction.mintTo(sender.address, config.txn.addressOrPallet);
     unsigned = {
       ...unsigned,
       gasLimit,
@@ -368,10 +380,12 @@ const sendRawTransaction = async (
   const sender = sendersMap.get(k)!;
   const receiver = receiversMap.get(k)!;
 
-  const token = (await ethers.getContractFactory("SimpleToken", sender)).attach(config.tokenAddress);
+  const token = (await ethers.getContractFactory("SimpleToken", sender)).attach(config.txn.addressOrPallet);
+
+  const params = config.txn.params.map(p => p == "<ACCOUNT>" ? receiver.address : p);
 
   // @ts-ignore
-  let unsigned = await token.populateTransaction[config.tokenMethod](config.tokenTransferMultiplier, receiver.address, 1);
+  let unsigned = await token.populateTransaction[config.txn.method](...params);
   unsigned = {
     ...unsigned,
     gasLimit,
@@ -439,13 +453,13 @@ const getReceiptLocally = async (txnHash: string, delay: number, retries: number
 
 const txpoolChecker = async (config: TPSConfig) => {
   let method = "author_pendingExtrinsics";
-  if (["geth", "frontier"].includes(config.variant)) method = "txpool_status";
+  if (["geth"].includes(config.variant)) method = "txpool_status";
   else if (config.variant === "parity") method = "parity_pendingTransactions";
 
   while (1) {
     try {
       let result = await waitForResponse(config, method, [], 250, 1);
-      if (["geth", "frontier"].includes(config.variant)) {
+      if (["geth"].includes(config.variant)) {
         txPoolLength = parseInt(result.pending, 16) + parseInt(result.queued, 16);
       } else txPoolLength = result.length;
     } catch { txPoolLength = -1; }
@@ -481,7 +495,7 @@ const checkTxpool = async (config: TPSConfig) => {
 }
 
 const checkTokenBalances = async (config: TPSConfig, deployer: Wallet) => {
-  const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.tokenAddress);
+  const token = (await ethers.getContractFactory("SimpleToken", deployer)).attach(config.txn.addressOrPallet);
   const sender = sendersMap.get(0)!;
   const balance = await token.balanceOf(sender.address);
   console.log(`[checkTokenBalances] ${sender.address} token balance: ${balance}`);
@@ -498,7 +512,7 @@ const checkETHBalances = async (config: TPSConfig, deployer: Wallet, nonce: numb
 const assertTokenBalances = async (config: TPSConfig) => {
   let diffs = 0;
   const receiver = receiversMap.get(0)!;
-  const token = (await ethers.getContractFactory("SimpleToken", receiver)).attach(config.tokenAddress);
+  const token = (await ethers.getContractFactory("SimpleToken", receiver)).attach(config.txn.addressOrPallet);
   for (let k = 0; k < config.accounts; k++) {
     const amounts = rcvBalances.get(k)!;
     const receiver = receiversMap.get(k)!;
@@ -521,7 +535,7 @@ const updateNonces = async (config: TPSConfig) => {
 
 const updateBalances = async (config: TPSConfig) => {
   const receiver = receiversMap.get(0)!;
-  const token = (await ethers.getContractFactory("SimpleToken", receiver)).attach(config.tokenAddress);
+  const token = (await ethers.getContractFactory("SimpleToken", receiver)).attach(config.txn.addressOrPallet);
   for (let k = 0; k < config.accounts; k++) {
     const receiver = receiversMap.get(k)!;
     const amount = await token.balanceOf(receiver.address);
@@ -574,7 +588,7 @@ const calculateTPS = async (config: TPSConfig, chainId: number, startingBlock: B
   let t = lastBlock.timestamp - startingBlock.timestamp;
   let err = `[errors=${reqErrorsMap.size}]`;
   let blocks = lastBlock.number - startingBlock.number;
-  return `blocks=${blocks} (${startingBlock.number} -> ${parseInt(lastBlock.number, 16)}) | txns=${config.transactions} t=${t} -> ${(config.transactions / t)} TPS/RPS ${err}`;
+  return `blocks=${blocks} (${startingBlock.number} -> ${parseInt(lastBlock.number, 16)}) | txns=${config.txn.quantity} t=${t} -> ${(config.txn.quantity / t)} TPS/RPS ${err}`;
 }
 
 const initNumberMap = (m: Map<number, any>, length: number, value: any) => {
@@ -589,7 +603,7 @@ const printNumberMap = (m: Map<number, any>) => {
 }
 
 const getAvailSender = async (config: TPSConfig, key: number) => {
-  const maxTxnPerSender = Math.ceil(config.transactions / config.accounts);
+  const maxTxnPerSender = Math.ceil(config.txn.quantity / config.accounts);
   key = key === 0 ? key : key + 1;
   if (key >= config.accounts) key = 0;
   while (sendersFreeMap.size > 0) {
@@ -689,7 +703,7 @@ const autoSendRawTransaction = async (
       nonceMap.set(senderKey, nextNonce);
 
       let amounts = rcvBalances.get(senderKey)!;
-      amounts.after += config.tokenTransferMultiplier;
+      amounts.after += config.txn.params[config.txn.amountIdx];
       rcvBalances.set(senderKey, amounts);
     } else { throw Error(`Invalid txHash: ${txHash}`) }
   } catch (error: any) {
@@ -716,16 +730,16 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
     let startingBlock = await staticProvider.getBlock("latest");
     let initialCounter = reqCounter;
 
-    while ((reqCounter - initialCounter) < config.transactions) {
+    while ((reqCounter - initialCounter) < config.txn.quantity) {
       if (hardstop) {
         hardstop = false;
         return [0, "HARD_STOP"];
       }
       // 5% of errors is too much, something is wrong.
-      if (reqErrorsMap.size >= (config.transactions * 0.05)) {
+      if (reqErrorsMap.size >= (config.txn.quantity * 0.05)) {
         console.log(printNumberMap(reqErrorsMap));
-        let p = Math.round((reqErrorsMap.size / config.transactions) * 100);
-        return [0, `TOO_MANY_ERRORS: ${reqErrorsMap.size}/${config.transactions} [~${p}%]`];
+        let p = Math.round((reqErrorsMap.size / config.txn.quantity) * 100);
+        return [0, `TOO_MANY_ERRORS: ${reqErrorsMap.size}/${config.txn.quantity} [~${p}%]`];
       }
       await checkTxpool(config);
       nextKey = await getAvailSender(config, nextKey);
@@ -751,7 +765,7 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
     reqErrorsMap.clear();
     reqErrCounter = 0;
 
-    if (config.tokenAssert) await assertTokenBalances(config);
+    await assertTokenBalances(config);
 
     lastTxHash = "";
 
@@ -777,7 +791,7 @@ const setup = async () => {
   await setupAccounts(config, EVM_TPS_SENDERS_FILE, EVM_TPS_RECEIVERS_FILE);
 
   let deployerNonce = await checkTokenBalances(config, deployer);
-  if (config.fundSenders) await checkETHBalances(config, deployer, deployerNonce!);
+  if (config.funding.senders) await checkETHBalances(config, deployer, deployerNonce!);
 
   await updateNonces(config);
   await updateBalances(config);
@@ -798,7 +812,7 @@ const main = async () => {
   blockTracker(config);
   txpoolChecker(config);
 
-  const gasLimit = ethers.BigNumber.from(config.gasLimit);
+  const gasLimit = ethers.BigNumber.from(config.txn.gasLimit);
   const chainId = (await ethers.provider.getNetwork()).chainId;
 
   gasPriceChecker(config);

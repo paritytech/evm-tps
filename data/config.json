@@ -7,25 +7,29 @@
     "address": "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac",
     "privateKey": "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
   },
-  "fundSenders": true,
-  "fundAmount": "1000000000000000000000",
   "accounts": 100,
   "workers": 80,
-  "sendRawTransaction": true,
-  "timeout": 15000,
-  "assetId": 0,
-  "tokenAddress": "",
-  "tokenMethod": "transferLoop",
-  "tokenAmountToMint": 1000000000,
-  "tokenAmountToSend": 1000,
-  "tokenTransferMultiplier": 1,
-  "tokenAssert": true,
-  "transactions": 3000,
-  "gasLimit": "200000",
+  "funding": {
+    "senders": true,
+    "amount": "1000000000000000000000",
+    "mint": 1000000000
+  },
+  "txn": {
+    "addressOrPallet": "balances",
+    "method": "transferKeepAlive",
+    "amountIdx": 1,
+    "params": [
+      "<ACCOUNT>",
+      1000
+    ],
+    "gasLimit": "200000",
+    "quantity": 15000
+  },
   "txpoolMaxLength": -1,
   "txpoolMultiplier": 3,
   "txpoolLimit": 7500,
   "checkersInterval": 250,
   "estimate": false,
+  "timeout": 15000,
   "verbose": false
 }
