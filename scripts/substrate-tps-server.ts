@@ -96,6 +96,7 @@ interface TPSConfig {
   workers: number,
   sendRawTransaction: boolean;
   timeout: number,
+  assetId: number | undefined;
   tokenAddress: string;
   tokenMethod: string;
   tokenAmountToMint: number;
@@ -159,6 +160,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
     workers: 80,
     sendRawTransaction: true,
     timeout: 5000,
+    assetId: undefined,
     tokenAddress: "",
     tokenMethod: "transferLoop",
     tokenAmountToMint: 1_000_000_000,
@@ -314,11 +316,13 @@ const batchSendNativeToken = async (config: TPSConfig, deployer: KeyringPair) =>
   await getReceiptLocally(txHash!, 500, 60);
 }
 
-const submitExtrinsic = async (api: ApiPromise, k: number, amount: string, nonce: number) => {
+const submitExtrinsic = async (api: ApiPromise, k: number, amount: string, nonce: number, assetId: number | undefined) => {
   const sender = sendersMap.get(k)!;
   const receiver = receiversMap.get(k)!;
 
-  const txHash = (await api.tx.balances.transferKeepAlive(receiver.address, amount).signAndSend(sender, { nonce })).toString();
+  let txHash;
+  if (assetId! >= 0) txHash = (await api.tx.assets.transfer(assetId, receiver.address, amount).signAndSend(sender, { nonce })).toString();
+  else txHash = (await api.tx.balances.transferKeepAlive(receiver.address, amount).signAndSend(sender, { nonce })).toString();
   if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
   return txHash;
@@ -329,9 +333,9 @@ const blockTracker = async (config: TPSConfig) => {
   // @ts-ignore
   let blockMaxWeights = api.consts.system.blockWeights.maxBlock.refTime;
   blockMaxWeights = blockMaxWeights.toNumber() * 0.75;
-  let blockNumber = 0;
+  let blockHash = '';
   const unsubscribe = await api.rpc.chain.subscribeNewHeads(async (header) => {
-    if (blockNumber != header.number.toNumber()) {
+    if (blockHash != header.hash.toString()) {
       const block = (await api.rpc.chain.getBlock(header.hash)!).block;
       // @ts-ignore
       let weight = (await (await api.at(header.hash)).query.system.blockWeight()).normal.refTime.toNumber();
@@ -342,7 +346,7 @@ const blockTracker = async (config: TPSConfig) => {
       msg += `[fee: ${printGasPrice(chainFee)} | pool: ${zeroPad(txPoolLength, 5)}]`;
       if (lastTxHash && !config.verbose) msg += ` -> xtHash: ${lastTxHash} `;
       console.log(msg);
-      blockNumber = header.number.toNumber();
+      blockHash = header.hash.toString();
     }
   });
 }
@@ -416,8 +420,17 @@ const assertTokenBalances = async (config: TPSConfig) => {
   for (let k = 0; k < config.accounts; k++) {
     const amounts = rcvBalances.get(k)!;
     const receiver = receiversMap.get(k)!;
-    // @ts-ignore
-    let { data: { free: amount } } = await api.query.system.account(receiver.address);
+    let amount = 0;
+    if (config.assetId! >= 0) {
+      // @ts-ignore
+      let data = await api.query.assets.account(config.assetId, receiver.address);
+      // @ts-ignore
+      if (!data.isEmpty) amount = data.toJSON().balance;
+    } else {
+      // @ts-ignore
+      let { data: { free } } = await api.query.system.account(receiver.address);
+      amount = free;
+    }
     const ok = amounts.after === amount.toString();
     if (!ok) diffs++;
   }
@@ -439,10 +452,51 @@ const updateBalances = async (config: TPSConfig) => {
   const api = await substrateApi.get(config);
   for (let k = 0; k < config.accounts; k++) {
     const receiver = receiversMap.get(k)!;
-    // @ts-ignore
-    let { data: { free: balance } } = await api.query.system.account(receiver.address);
-    console.log(`[updateBalances] ${receiver.address} -> ${balance}`);
+    let balance = 0;
+    if (config.assetId! >= 0) {
+      // @ts-ignore
+      let data = await api.query.assets.account(config.assetId, receiver.address);
+      // @ts-ignore
+      if (!data.isEmpty) balance = data.toJSON().balance;
+      console.log(`[updateBalances] Asset [id:${config.assetId}] ${receiver.address} -> ${balance}`);
+    } else {
+      // @ts-ignore
+      let { data: { free } } = await api.query.system.account(receiver.address);
+      balance = free;
+      console.log(`[updateBalances] ${receiver.address} -> ${balance}`);
+    }
     rcvBalances.set(k, { before: balance.toString(), after: balance.toString() });
+  }
+}
+
+const setupAssets = async (config: TPSConfig, deployer: KeyringPair) => {
+  const api = await substrateApi.get(config);
+  let txHash;
+  const hash = await api.rpc.chain.getBlockHash()!;
+  const assetZero = await (await api.at(hash)).query.assets.asset(0);
+  if (assetZero.isEmpty) {
+    console.log(`[setupAssets] Creating an Asset [id:0] ...`);
+    txHash = (await api.tx.assets.create(0, deployer.address, 1).signAndSend(deployer)).toString();
+  }
+  console.log(`[setupAssets] Asset Created [id:0]`);
+  const sender = sendersMap.get(0)!;
+  // @ts-ignore
+  const data = await (await api.at(hash)).query.assets.account(0, sender.address);
+  // @ts-ignore
+  console.log(`[setupAssets] ${sender.address} Asset [id:0] balance: ${data.isEmpty ? 0 : data.toJSON().balance}`);
+  if (data.isEmpty) {
+    let nonce = await api.rpc.system.accountNextIndex(deployer.address);
+    for (let k = 0; k < sendersMap.size; k++) {
+      const sender = sendersMap.get(k)!;
+      const amount = new BN(config.tokenAmountToMint);
+      txHash = (await api.tx.assets.mint(0, sender.address, amount.toString()).signAndSend(deployer, { nonce })).toString();
+      if (!validTxHash(txHash)) throw Error(`[ERROR] setupAssets() -> ${JSON.stringify(txHash)}`);
+      console.log(`[setupAssets] Minting Asset [id:0] to ${sender.address} -> ${txHash}`);
+      if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
+      // @ts-ignore
+      nonce = nonce.add(new BN(1));
+    }
+    await getReceiptLocally(txHash!, 500, 60);
   }
 }
 
@@ -510,7 +564,7 @@ const printNumberMap = (m: Map<number, any>) => {
 const getBlockWithExtras = async (api: ApiPromise, number: number | null): Promise<SimpleBlock> => {
   let hash, block, timestamp;
   if (number) {
-    hash = (await api.rpc.chain.getBlockHash(number)!);
+    hash = await api.rpc.chain.getBlockHash(number)!;
     block = (await api.rpc.chain.getBlock(hash)!).block;
     timestamp = await (await api.at(hash)).query.timestamp.now();
   } else {
@@ -609,7 +663,7 @@ const autoSendRawTransaction = async (
 
   const start = Date.now();
   try {
-    const txHash = await submitExtrinsic(api, senderKey, config.tokenAmountToSend.toString(), nonce);
+    const txHash = await submitExtrinsic(api, senderKey, config.tokenAmountToSend.toString(), nonce, config.assetId);
     if (validTxHash(txHash)) {
       const t = Date.now() - start;
       const postWithTime = `${post} [time: ${zeroPad(t, 5)}${t > 12000 ? " ***" : ""}]`;
@@ -621,7 +675,7 @@ const autoSendRawTransaction = async (
       nonceMap.set(senderKey, nextNonce);
 
       let amounts = rcvBalances.get(senderKey)!;
-      let amount = new BN(config.tokenAmountToSend).add(new BN(amounts.after));
+      let amount = new BN(amounts.after).add(new BN(config.tokenAmountToSend));
       rcvBalances.set(senderKey, { ...amounts, after: amount.toString() });
     } else { throw Error(`Invalid txHash: ${txHash}`) }
   } catch (error: any) {
@@ -719,6 +773,8 @@ const setup = async () => {
   const api = await substrateApi.get(config);
   let block = await getBlockWithExtras(api, null);
   inherentExtrinsics = block.extrinsics.length;
+
+  if (config.assetId! >= 0) await setupAssets(config, deployer);
 
   if (config.fundSenders) await checkBalances(config, deployer);
 
