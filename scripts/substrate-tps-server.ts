@@ -293,6 +293,26 @@ const waitForResponse = async (config: TPSConfig, method: string, params: any[],
   return result;
 }
 
+const batchMintNfts = async (config: TPSConfig, deployer: KeyringPair) => {
+  const api = await substrateApi.get(config);
+  let nonce = await api.rpc.system.accountNextIndex(deployer.address);
+  
+  //Create collection
+  let nftCollectionCreation = (await api.tx.nfts.create(deployer, {}).signAndSend(deployer, {nonce})).toString();
+  if (!validTxHash(nftCollectionCreation)) throw Error(`[ERROR] batchMintNfts() -> ${JSON.stringify(nftCollectionCreation)}`);
+
+  let txHash;
+  for (let k = 0; k < sendersMap.size; k++) {
+    const sender = sendersMap.get(k)!;
+    txHash = (await api.tx.nfts.mint(0, k, sender, null).signAndSend(deployer, { nonce })).toString();
+    if (!validTxHash(txHash)) throw Error(`[ERROR] batchSendNativeToken() -> ${JSON.stringify(txHash)}`);
+    console.log(`[batchSendNativeToken] Sending Native Token to ${sender.address} -> ${txHash}`);
+    if ((k + 1) % 500 === 0) await new Promise(r => setTimeout(r, 6000));
+    // @ts-ignore
+    nonce = nonce.add(new BN(1));
+  }
+}
+
 const batchSendNativeToken = async (config: TPSConfig, deployer: KeyringPair) => {
   const api = await substrateApi.get(config);
   let nonce = await api.rpc.system.accountNextIndex(deployer.address);
@@ -313,7 +333,7 @@ const submitExtrinsic = async (api: ApiPromise, k: number, nonce: number) => {
   const sender = sendersMap.get(k)!;
   const receiver = receiversMap.get(k)!;
 
-  const txHash = (await api.tx.balances.transferKeepAlive(receiver.address, 1_000).signAndSend(sender, { nonce })).toString();
+  const txHash = (await api.tx.nfts.transfer(0, k, receiver).signAndSend(sender, { nonce })).toString();
   // const txHash = (await api.tx.templatePallet.doSomething2(7).signAndSend(sender, { nonce })).toString();
   if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
