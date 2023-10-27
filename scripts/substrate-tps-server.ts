@@ -137,7 +137,7 @@ const readJSON = async (filename: string) => {
 
 const getDeployer = async (configFilename: string) => {
   await cryptoWaitReady();
-  let keyring = new Keyring({ type: 'sr25519' });
+  let keyring = new Keyring({ type: 'sr25519', ss58Format: 137 });
   try {
     const config = await readJSON(configFilename);
     if (config.variant === 'frontier') keyring = new Keyring({ type: 'ethereum' });
@@ -508,6 +508,39 @@ const setupAssets = async (config: TPSConfig, deployer: KeyringPair) => {
   }
 }
 
+const setupNFTs = async (config: TPSConfig, deployer: KeyringPair) => {
+  const api = await substrateApi.get(config);
+  let txHash;
+  const hash = await api.rpc.chain.getBlockHash()!;
+  const collectionId = config.txn.params[0];
+  const collectionZero = await (await api.at(hash)).query.nfts.collection(collectionId);
+  if (collectionZero.isEmpty) {
+    console.log(`[setupNFTs] Creating an NFT Collection [id:${collectionId}] ...`);
+    txHash = (await api.tx.nfts.create(deployer.address, {}).signAndSend(deployer)).toString();
+  }
+  console.log(`[setupNFTs] NFT Collection Created [id:${collectionId}]`);
+  const sender = sendersMap.get(0)!;
+  let itemId = 0;
+  // @ts-ignore
+  const data = await (await api.at(hash)).query.nfts.account(sender.address, collectionId, itemId);
+  // @ts-ignore
+  console.log(`[setupNFTs] ${sender.address} NFT Collection [id:${collectionId}] items: ${data.isEmpty ? 'NotOwner' : 'Owner'}`);
+  if (data.isEmpty) {
+    let nonce = await api.rpc.system.accountNextIndex(deployer.address);
+    // We mint X items for the first sender as it will be the only one sending transfer xts. (x >= txn.quantity)
+    for (let k = 0; k < config.txn.quantity; k++) {
+      txHash = (await api.tx.nfts.mint(collectionId, itemId, sender.address, {}).signAndSend(deployer, { nonce })).toString();
+      if (!validTxHash(txHash)) throw Error(`[ERROR] setupNFTs() -> ${JSON.stringify(txHash)}`);
+      console.log(`[setupNFTs] Minting NFT Items [id:${collectionId}] to ${sender.address} -> ${txHash}`);
+      await checkTxpool(config);
+      // @ts-ignore
+      nonce = nonce.add(new BN(1));
+      itemId++;
+    }
+    await getReceiptLocally(txHash!, 500, 60);
+  }
+}
+
 const resetMaps = (config: TPSConfig) => {
   sendersMap.clear();
   sendersBusyMap.clear();
@@ -709,6 +742,10 @@ const auto = async (config: TPSConfig) => {
     let startingBlock = await getBlockWithExtras(api, null);
     let initialCounter = reqCounter;
 
+    // NFTs
+    const sender = sendersMap.get(0)!;
+    let firstSenderNonce = await api.rpc.system.accountNextIndex(sender.address); 
+
     while ((reqCounter - initialCounter) < config.txn.quantity) {
       if (hardstop) {
         hardstop = false;
@@ -724,7 +761,14 @@ const auto = async (config: TPSConfig) => {
       nextKey = await getAvailSender(config, nextKey);
       if (nextKey === -1 || sendersFreeMap.size === 0) break;
       workerId = await getFreeWorker(config, workerId);
-      const nonce = nonceMap.get(nextKey)!;
+      let nonce = nonceMap.get(nextKey)!;
+      // For NFTS we only use first sender
+      if (config.txn.addressOrPallet === 'nfts') {
+        nextKey = 0;
+        nonce = firstSenderNonce.toNumber();
+        // @ts-ignore
+        firstSenderNonce = firstSenderNonce.add(new BN(1));
+      }
       reqCounter++;
       autoSendRawTransaction(config, workerId, nextKey, nonce);
       sendersTxnMap.set(nextKey, sendersTxnMap.get(nextKey)! + 1);
@@ -782,9 +826,10 @@ const setup = async () => {
   let block = await getBlockWithExtras(api, null);
   inherentExtrinsics = block.extrinsics.length;
 
-  if (config.txn.addressOrPallet === 'assets') await setupAssets(config, deployer);
-
   if (config.funding.senders) await checkBalances(config, deployer);
+
+  if (config.txn.addressOrPallet === 'assets') await setupAssets(config, deployer);
+  if (config.txn.addressOrPallet === 'nfts') await setupNFTs(config, deployer);
 
   await updateNonces(config);
   await updateBalances(config);

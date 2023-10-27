@@ -15,15 +15,16 @@
     "mint": 1000000000
   },
   "txn": {
-    "addressOrPallet": "balances",
-    "method": "transferKeepAlive",
+    "addressOrPallet": "nfts",
+    "method": "transfer",
     "amountIdx": 1,
     "params": [
-      "<ACCOUNT>",
-      1000
+      0,
+      0,
+      "<ACCOUNT>"
     ],
     "gasLimit": "200000",
-    "quantity": 15000
+    "quantity": 8000
   },
   "txpoolMaxLength": -1,
   "txpoolMultiplier": 3,
