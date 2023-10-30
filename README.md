@@ -19,12 +19,17 @@ Change test's parameters in [data/config.json](./data/config.json) for the diffe
 
     ```json
     "txn": {
-      "addressOrPallet": "",
+      "module": "erc20",
+      "address": "",
       "method": "transferLoop",
       "amountIdx": 2,
-      "params": [1, "<ACCOUNT>", 1],
+      "params": [
+        1,
+        "<ACCOUNT>",
+        1
+      ],
       "gasLimit": "200000",
-      "quantity": 25000
+      "quantity": 10000
     },
     ```
 
@@ -33,7 +38,12 @@ Change test's parameters in [data/config.json](./data/config.json) for the diffe
 -   **Erc721**: Use the following `txn` object
 
     ```json
-
+    "txn": {
+      "module": "erc721",
+      "address": "",
+      "gasLimit": "200000",
+      "quantity": 5000
+    },
     ```
 
 After setting the configuration for `txn` inside [data/config.json](./data/config.json) run:
@@ -42,7 +52,7 @@ After setting the configuration for `txn` inside [data/config.json](./data/confi
 yarn evm
 ```
 
-This will perform an initial setup. After this initiall setup is done and the script outputs
+This will perform an initial setup. After this initiall setup is done and the script outputs (Make sure that the blocks are empty showing (~000%), meaning that the setup is complete).
 
 ```
 [BlockTracker] Block: 0381 | txns: 0000 | gasUsed: 000000000 (~000%) [gasPrice: 0M | pool: 00000]
@@ -62,19 +72,19 @@ This will start the transaction sending and the first script should start showin
 -   **Native asset (pallet-balances)**: Use the following `txn` object
     ```json
     "txn": {
-        "addressOrPallet": "balances",
+        "module": "balances",
         "method": "transferKeepAlive",
         "amountIdx": 1,
         "params": ["<ACCOUNT>", 1],
         "gasLimit": "200000",
-        "quantity": 25000
+        "quantity": 10000
       },
     ```
 -   **Pallet-assets**: Use the following `txn` object
 
     ```json
     "txn": {
-        "addressOrPallet": "assets",
+        "module": "assets",
         "method": "transfer",
         "amountIdx": 2,
         "params": [
@@ -83,14 +93,14 @@ This will start the transaction sending and the first script should start showin
           1
         ],
         "gasLimit": "200000",
-        "quantity": 25000
+        "quantity": 10000
       },
     ```
 
 -   **Pallet-nfts**: Use the following `txn` object
     ```json
     "txn": {
-        "addressOrPallet": "nfts",
+        "module": "nfts",
         "method": "transfer",
         "amountIdx": 1,
         "params": [
@@ -99,7 +109,7 @@ This will start the transaction sending and the first script should start showin
           "<ACCOUNT>"
         ],
         "gasLimit": "200000",
-        "quantity": 8000
+        "quantity": 10000
       },
     ```
 

@@ -12,7 +12,9 @@ import { BigNumber } from 'ethers';
 import { PopulatedTransaction } from 'ethers/lib/ethers';
 
 import { deploy } from './common';
+import { deployNfts, transferNfts } from './nfts';
 import { Block } from '@ethersproject/providers';
+import { erc20 } from '../typechain-types/@openzeppelin/contracts/token';
 
 const EVM_TPS_ROOT_DIR = process.env.ROOT_DIR || 'data';
 const EVM_TPS_CONFIG_FILE = `${EVM_TPS_ROOT_DIR}/config.json`;
@@ -62,7 +64,8 @@ interface Funding {
 }
 
 interface Transaction {
-    addressOrPallet: string;
+    module: string;
+    address: string;
     method: string;
     amountIdx: number;
     params: Array<any>;
@@ -138,7 +141,8 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
             mint: 1_000_000_000,
         },
         txn: {
-            addressOrPallet: '',
+            module: 'erc20',
+            address: '',
             method: 'transferLoop',
             amountIdx: 2,
             // (n, to, amount)
@@ -166,22 +170,24 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
     chainGasPrice = await ethers.provider.getGasPrice();
     if (chainGasPrice.mul(2).gt(gasPrice)) gasPrice = chainGasPrice.mul(2);
 
-    let tokenAddress = config.txn.addressOrPallet || '';
-    if (tokenAddress === '' && config.payloads?.length)
-        tokenAddress = config.payloads[0].to ? config.payloads[0].to : tokenAddress;
+    if (config.txn.module == 'erc20') {
+        let tokenAddress = config.txn.address || '';
+        if (tokenAddress === '' && config.payloads?.length)
+            tokenAddress = config.payloads[0].to ? config.payloads[0].to : tokenAddress;
 
-    if (tokenAddress !== '') {
-        const bytecode = await ethers.provider.getCode(tokenAddress);
-        if (bytecode.length <= 2) tokenAddress = ''; // 0x
-    }
+        if (tokenAddress !== '') {
+            const bytecode = await ethers.provider.getCode(tokenAddress);
+            if (bytecode.length <= 2) tokenAddress = ''; // 0x
+        }
 
-    if (tokenAddress === '' && config.payloads === undefined) {
-        const token = await deploy(deployer);
-        let tx = await token.start({ gasLimit, gasPrice });
-        await tx.wait();
-        tx = await token.mintTo(deployer.address, config.funding.mint);
-        await tx.wait();
-        config.txn.addressOrPallet = token.address;
+        if (tokenAddress === '' && config.payloads === undefined) {
+            const token = await deploy(deployer);
+            let tx = await token.start({ gasLimit, gasPrice });
+            await tx.wait();
+            tx = await token.mintTo(deployer.address, config.funding.mint);
+            await tx.wait();
+            config.txn.address = token.address;
+        }
     }
 
     await promisify(fs.writeFile)(configFilename, JSON.stringify(config, null, 2));
@@ -201,7 +207,7 @@ const setTxpool = async (config: TPSConfig, deployer: Wallet) => {
     else {
         const receiver = receiversMap.get(0)!;
         const token = (await ethers.getContractFactory('SimpleToken', deployer)).attach(
-            config.txn.addressOrPallet
+            config.txn.address
         );
         const params = config.txn.params.map((p) => (p == '<ACCOUNT>' ? receiver.address : p));
         // @ts-ignore
@@ -334,7 +340,7 @@ const waitForResponse = async (
 
 const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
     const token = (await ethers.getContractFactory('SimpleToken', deployer)).attach(
-        config.txn.addressOrPallet
+        config.txn.address
     );
 
     const gasLimit = ethers.BigNumber.from('1000000');
@@ -345,10 +351,7 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
     let txHash;
     for (let k = 0; k < sendersMap.size; k++) {
         const sender = sendersMap.get(k)!;
-        let unsigned = await token.populateTransaction.mintTo(
-            sender.address,
-            config.txn.addressOrPallet
-        );
+        let unsigned = await token.populateTransaction.mintTo(sender.address, config.txn.address);
         unsigned = {
             ...unsigned,
             gasLimit,
@@ -411,7 +414,7 @@ const sendRawTransaction = async (
     const receiver = receiversMap.get(k)!;
 
     const token = (await ethers.getContractFactory('SimpleToken', sender)).attach(
-        config.txn.addressOrPallet
+        config.txn.address
     );
 
     const params = config.txn.params.map((p) => (p == '<ACCOUNT>' ? receiver.address : p));
@@ -562,7 +565,7 @@ const checkTxpool = async (config: TPSConfig) => {
 
 const checkTokenBalances = async (config: TPSConfig, deployer: Wallet) => {
     const token = (await ethers.getContractFactory('SimpleToken', deployer)).attach(
-        config.txn.addressOrPallet
+        config.txn.address
     );
     const sender = sendersMap.get(0)!;
     const balance = await token.balanceOf(sender.address);
@@ -581,7 +584,7 @@ const assertTokenBalances = async (config: TPSConfig) => {
     let diffs = 0;
     const receiver = receiversMap.get(0)!;
     const token = (await ethers.getContractFactory('SimpleToken', receiver)).attach(
-        config.txn.addressOrPallet
+        config.txn.address
     );
     for (let k = 0; k < config.accounts; k++) {
         const amounts = rcvBalances.get(k)!;
@@ -609,7 +612,7 @@ const updateNonces = async (config: TPSConfig) => {
 const updateBalances = async (config: TPSConfig) => {
     const receiver = receiversMap.get(0)!;
     const token = (await ethers.getContractFactory('SimpleToken', receiver)).attach(
-        config.txn.addressOrPallet
+        config.txn.address
     );
     for (let k = 0; k < config.accounts; k++) {
         const receiver = receiversMap.get(k)!;
@@ -833,25 +836,34 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
         let startingBlock = await staticProvider.getBlock('latest');
         let initialCounter = reqCounter;
 
-        while (reqCounter - initialCounter < config.txn.quantity) {
-            if (hardstop) {
-                hardstop = false;
-                return [0, 'HARD_STOP'];
+        if (config.txn.module === 'erc20') {
+            while (reqCounter - initialCounter < config.txn.quantity) {
+                if (hardstop) {
+                    hardstop = false;
+                    return [0, 'HARD_STOP'];
+                }
+                // 5% of errors is too much, something is wrong.
+                if (reqErrorsMap.size >= config.txn.quantity * 0.05) {
+                    console.log(printNumberMap(reqErrorsMap));
+                    let p = Math.round((reqErrorsMap.size / config.txn.quantity) * 100);
+                    return [
+                        0,
+                        `TOO_MANY_ERRORS: ${reqErrorsMap.size}/${config.txn.quantity} [~${p}%]`,
+                    ];
+                }
+                await checkTxpool(config);
+                nextKey = await getAvailSender(config, nextKey);
+                if (nextKey === -1 || sendersFreeMap.size === 0) break;
+                workerId = await getFreeWorker(config, workerId);
+                const nonce = nonceMap.get(nextKey)!;
+                reqCounter++;
+                autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, chainId);
+                sendersTxnMap.set(nextKey, sendersTxnMap.get(nextKey)! + 1);
             }
-            // 5% of errors is too much, something is wrong.
-            if (reqErrorsMap.size >= config.txn.quantity * 0.05) {
-                console.log(printNumberMap(reqErrorsMap));
-                let p = Math.round((reqErrorsMap.size / config.txn.quantity) * 100);
-                return [0, `TOO_MANY_ERRORS: ${reqErrorsMap.size}/${config.txn.quantity} [~${p}%]`];
-            }
-            await checkTxpool(config);
-            nextKey = await getAvailSender(config, nextKey);
-            if (nextKey === -1 || sendersFreeMap.size === 0) break;
-            workerId = await getFreeWorker(config, workerId);
-            const nonce = nonceMap.get(nextKey)!;
-            reqCounter++;
-            autoSendRawTransaction(config, workerId, nextKey, nonce, gasLimit, chainId);
-            sendersTxnMap.set(nextKey, sendersTxnMap.get(nextKey)! + 1);
+        }
+
+        if (config.txn.module === 'erc721') {
+            transferNfts(nftAddress, config.txn.quantity);
         }
 
         // Wait till no more running workers.
@@ -872,7 +884,9 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
         reqErrorsMap.clear();
         reqErrCounter = 0;
 
-        await assertTokenBalances(config);
+        if (config.txn.module === 'erc20') {
+            await assertTokenBalances(config);
+        }
 
         lastTxHash = '';
 
@@ -892,6 +906,7 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
     return [status_code, msg];
 };
 
+let nftAddress = '';
 const setup = async () => {
     setupDirs();
 
@@ -900,15 +915,19 @@ const setup = async () => {
 
     resetMaps(config);
 
-    await setupAccounts(config, EVM_TPS_SENDERS_FILE, EVM_TPS_RECEIVERS_FILE);
+    if (config.txn.module === 'erc20') {
+        await setupAccounts(config, EVM_TPS_SENDERS_FILE, EVM_TPS_RECEIVERS_FILE);
+        let deployerNonce = await checkTokenBalances(config, deployer);
+        if (config.funding.senders) await checkETHBalances(config, deployer, deployerNonce!);
 
-    let deployerNonce = await checkTokenBalances(config, deployer);
-    if (config.funding.senders) await checkETHBalances(config, deployer, deployerNonce!);
+        await updateNonces(config);
+        await updateBalances(config);
+        config = await setTxpool(config, deployer);
+    }
 
-    await updateNonces(config);
-    await updateBalances(config);
-
-    config = await setTxpool(config, deployer);
+    if (config.txn.module === 'erc721' && nftAddress == '') {
+        nftAddress = await deployNfts(config.txn.quantity);
+    }
 
     console.log(JSON.stringify(config, null, 2));
 

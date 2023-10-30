@@ -92,7 +92,7 @@ interface Funding {
 }
 
 interface Transaction {
-    addressOrPallet: string;
+    module: string;
     method: string;
     amountIdx: number;
     params: Array<any>;
@@ -171,7 +171,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
             mint: 1_000_000_000,
         },
         txn: {
-            addressOrPallet: 'balances',
+            module: 'balances',
             method: 'transferKeepAlive',
             amountIdx: 1,
             params: ['<ACCOUNT>', 1],
@@ -211,7 +211,7 @@ const setTxpool = async (config: TPSConfig, deployer: KeyringPair) => {
     blockMaxFee = (blockMaxFee * 3n) / 4n;
     console.log(`[Txpool] Block Max Fee    : ${blockMaxFee}`);
     const params = config.txn.params.map((p) => (p == '<ACCOUNT>' ? deployer.address : p));
-    const xt = api.tx[config.txn.addressOrPallet][config.txn.method](...params);
+    const xt = api.tx[config.txn.module][config.txn.method](...params);
     const info = await xt.paymentInfo(deployer);
     // @ts-ignore
     const xtFee = (await api.call.transactionPaymentApi.queryWeightToFee(info.weight)).toBigInt();
@@ -355,9 +355,7 @@ const submitExtrinsic = async (config: TPSConfig, api: ApiPromise, k: number, no
 
     const params = config.txn.params.map((p) => (p == '<ACCOUNT>' ? receiver.address : p));
     const txHash = (
-        await api.tx[config.txn.addressOrPallet]
-            [config.txn.method](...params)
-            .signAndSend(sender, { nonce })
+        await api.tx[config.txn.module][config.txn.method](...params).signAndSend(sender, { nonce })
     ).toString();
     if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
@@ -420,7 +418,7 @@ const feeChecker = async (config: TPSConfig) => {
     const api = await substrateApi.get(config);
     let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
     const params = config.txn.params.map((p) => (p == '<ACCOUNT>' ? deployer.address : p));
-    const xt = api.tx[config.txn.addressOrPallet][config.txn.method](...params);
+    const xt = api.tx[config.txn.module][config.txn.method](...params);
     while (1) {
         try {
             let { partialFee: fee } = await xt.paymentInfo(deployer);
@@ -467,7 +465,7 @@ const assertTokenBalances = async (config: TPSConfig) => {
         const amounts = rcvBalances.get(k)!;
         const receiver = receiversMap.get(k)!;
         let amount = 0;
-        if (config.txn.addressOrPallet === 'assets') {
+        if (config.txn.module === 'assets') {
             // @ts-ignore
             let data = await api.query.assets.account(config.txn.params[0], receiver.address);
             // @ts-ignore
@@ -504,7 +502,7 @@ const updateBalances = async (config: TPSConfig) => {
     for (let k = 0; k < config.accounts; k++) {
         const receiver = receiversMap.get(k)!;
         let balance = 0;
-        if (config.txn.addressOrPallet === 'assets') {
+        if (config.txn.module === 'assets') {
             const assetId = config.txn.params[0];
             // @ts-ignore
             let data = await api.query.assets.account(assetId, receiver.address);
@@ -845,7 +843,7 @@ const auto = async (config: TPSConfig) => {
             workerId = await getFreeWorker(config, workerId);
             let nonce = nonceMap.get(nextKey)!;
             // For NFTS we only use first sender
-            if (config.txn.addressOrPallet === 'nfts') {
+            if (config.txn.module === 'nfts') {
                 nextKey = 0;
                 nonce = firstSenderNonce.toNumber();
                 // @ts-ignore
@@ -919,8 +917,8 @@ const setup = async () => {
 
     if (config.funding.senders) await checkBalances(config, deployer);
 
-    if (config.txn.addressOrPallet === 'assets') await setupAssets(config, deployer);
-    if (config.txn.addressOrPallet === 'nfts') await setupNFTs(config, deployer);
+    if (config.txn.module === 'assets') await setupAssets(config, deployer);
+    if (config.txn.module === 'nfts') await setupNFTs(config, deployer);
 
     await updateNonces(config);
     await updateBalances(config);
