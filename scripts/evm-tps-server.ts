@@ -17,9 +17,10 @@ import { Block } from '@ethersproject/providers';
 import { erc20 } from '../typechain-types/@openzeppelin/contracts/token';
 
 const EVM_TPS_ROOT_DIR = process.env.ROOT_DIR || 'data';
-const ERC20_CONFIG_FILE = `${EVM_TPS_ROOT_DIR}/config.erc20.json`;
 const EVM_TPS_SENDERS_FILE = `${EVM_TPS_ROOT_DIR}/senders.json`;
 const EVM_TPS_RECEIVERS_FILE = `${EVM_TPS_ROOT_DIR}/receivers.json`;
+
+let EVM_TPS_CONFIG_FILE = `${EVM_TPS_ROOT_DIR}/config.json`;
 
 interface Balances {
     before: number;
@@ -906,12 +907,18 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
     return [status_code, msg];
 };
 
+const getFilePath = async (symLinkPath: fs.PathLike) => {
+    let realPath = fs.readlinkSync(symLinkPath);
+    return realPath;
+};
+
 let nftAddress = '';
 const setup = async () => {
     setupDirs();
 
-    let deployer = await getDeployer(ERC20_CONFIG_FILE);
-    let config = await setConfig(ERC20_CONFIG_FILE, deployer);
+    EVM_TPS_CONFIG_FILE = await getFilePath(EVM_TPS_CONFIG_FILE);
+    let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
+    let config = await setConfig(EVM_TPS_CONFIG_FILE, deployer);
 
     resetMaps(config);
 
