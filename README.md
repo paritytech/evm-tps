@@ -15,41 +15,21 @@ Change test's parameters in [data/config.json](./data/config.json) for the diffe
 
 ### EVM thoughput
 
--   **Erc20**: Use the following `txn` object
+-   **Erc20**: Use the following config file:
 
-    ```json
-    "txn": {
-      "module": "erc20",
-      "address": "",
-      "method": "transferLoop",
-      "amountIdx": 2,
-      "params": [
-        1,
-        "<ACCOUNT>",
-        1
-      ],
-      "gasLimit": "200000",
-      "quantity": 10000
-    },
-    ```
+```
+$ rm data/config.json
+$ ln -s data/config.erc20.json data/config.json
+```
 
-    `quantity` will determine how many transactions are sent.
+   Inside `config.erc20.json`, the variable `quantity` will determine how many transactions are sent.
 
--   **Erc721**: Use the following `txn` object
+-   **Erc721**: Use the followig config file:
 
-    ```json
-    "txn": {
-      "module": "erc721",
-      "address": "",
-      "gasLimit": "200000",
-      "quantity": 5000
-    },
-    ```
-
-After setting the configuration for `txn` inside [data/config.json](./data/config.json) run:
+After setting the desired `data/config.json`, run:
 
 ```bash
-yarn evm
+$ yarn evm
 ```
 
 This will perform an initial setup. After this initiall setup is done and the script outputs (Make sure that the blocks are empty showing (~000%), meaning that the setup is complete).
@@ -62,61 +42,25 @@ This will perform an initial setup. After this initiall setup is done and the sc
 In a different terminal run:
 
 ```bash
-curl -X GET "http://0.0.0.0:8181/auto"
+$ curl -X GET "http://0.0.0.0:8181/auto"
 ```
 
 This will start the transaction sending and the first script should start showing activity inside the blocks
 
 ### Substrate thoughput
 
--   **Native asset (pallet-balances)**: Use the following `txn` object
-    ```json
-    "txn": {
-        "module": "balances",
-        "method": "transferKeepAlive",
-        "amountIdx": 1,
-        "params": ["<ACCOUNT>", 1],
-        "gasLimit": "200000",
-        "quantity": 10000
-      },
-    ```
--   **Pallet-assets**: Use the following `txn` object
+-   **Native asset (pallet-balances)**: Use the following `config.json`:
 
-    ```json
-    "txn": {
-        "module": "assets",
-        "method": "transfer",
-        "amountIdx": 2,
-        "params": [
-          0,
-          "<ACCOUNT>",
-          1
-        ],
-        "gasLimit": "200000",
-        "quantity": 10000
-      },
-    ```
+```
+$ rm data/config.json
+$ ln -s data/config.balances.json data/config.json
+```
 
--   **Pallet-nfts**: Use the following `txn` object
-    ```json
-    "txn": {
-        "module": "nfts",
-        "method": "transfer",
-        "amountIdx": 1,
-        "params": [
-          0,
-          0,
-          "<ACCOUNT>"
-        ],
-        "gasLimit": "200000",
-        "quantity": 10000
-      },
-    ```
+-   **Pallet-nfts**: Use the following `config.json`:
 
-After setting the configuration for `txn` inside [data/config.json](./data/config.json) run:
-
-```bash
-yarn substrate
+```
+$ rm data/config.json
+$ ln -s data/config.nfts.json data/config.json
 ```
 
 This will perform an initial setup. After this initiall setup is done and the script outputs.

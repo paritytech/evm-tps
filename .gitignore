@@ -138,4 +138,6 @@ cache
 artifacts
 
 # Local
-data/
+data/senders.json
+data/receivers.json
+data/config.json

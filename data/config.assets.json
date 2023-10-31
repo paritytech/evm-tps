@@ -1,0 +1,36 @@
+{
+  "tpsServerHost": "0.0.0.0",
+  "tpsServerPort": 8181,
+  "endpoint": "http://127.0.0.1:9933",
+  "variant": "frontier",
+  "deployer": {
+    "address": "0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac",
+    "privateKey": "0x5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133"
+  },
+  "accounts": 100,
+  "workers": 80,
+  "funding": {
+    "senders": true,
+    "amount": "1000000000000000000000",
+    "mint": 1000000000
+  },
+  "txn": {
+    "module": "assets",
+    "method": "transfer",
+    "amountIdx": 2,
+    "params": [
+      0,
+      "<ACCOUNT>",
+      1
+    ],
+    "gasLimit": "200000",
+    "quantity": 100000
+  },
+  "txpoolMaxLength": -1,
+  "txpoolMultiplier": 3,
+  "txpoolLimit": 7500,
+  "checkersInterval": 250,
+  "estimate": false,
+  "timeout": 15000,
+  "verbose": false
+}
