@@ -916,7 +916,9 @@ let nftAddress = '';
 const setup = async () => {
     setupDirs();
 
-    EVM_TPS_CONFIG_FILE = await getFilePath(EVM_TPS_CONFIG_FILE);
+    if ((EVM_TPS_CONFIG_FILE = `${EVM_TPS_ROOT_DIR}/config.json`)) {
+        EVM_TPS_CONFIG_FILE = await getFilePath(EVM_TPS_CONFIG_FILE);
+    }
     let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
     let config = await setConfig(EVM_TPS_CONFIG_FILE, deployer);
 
