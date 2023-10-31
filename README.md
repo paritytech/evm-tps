@@ -18,13 +18,18 @@ Change test's parameters in [data/config.json](./data/config.json) for the diffe
 -   **Erc20**: Use the following config file:
 
 ```
-$ rm data/config.json
-$ ln -s data/config.erc20.json data/config.json
+rm data/config.json
+ln -s data/config.erc20.json data/config.json
 ```
 
-   Inside `config.erc20.json`, the variable `quantity` will determine how many transactions are sent.
+Inside `config.erc20.json`, the variable `quantity` will determine how many transactions are sent.
 
 -   **Erc721**: Use the followig config file:
+
+```
+rm data/config.json
+ln -s data/config.erc721.json data/config.json
+```
 
 After setting the desired `data/config.json`, run:
 
@@ -54,6 +59,13 @@ This will start the transaction sending and the first script should start showin
 ```
 $ rm data/config.json
 $ ln -s data/config.balances.json data/config.json
+```
+
+-   **Pallet-assets**: Use the following `config.json`:
+
+```
+$ rm data/config.json
+$ ln -s data/config.assets.json data/config.json
 ```
 
 -   **Pallet-nfts**: Use the following `config.json`:
