@@ -1,6 +1,7 @@
 #!/bin/bash
 
 MODE="$1"
+EVM_TPS_PATH="$2"
 
 set_balances() {
   echo "Setting up balances mode..."
@@ -32,6 +33,12 @@ set_erc721() {
   cp data/config.erc721.json data/config.json
 }
 
+if [ -z "$EVM_TPS_PATH" ]; then
+    echo "Error: EVM_TPS_PATH environment variable is not set. Halting execution."
+    exit 1
+fi
+
+pushd $EVM_TPS_PATH
 yarn
 
 case "$MODE" in
@@ -60,3 +67,5 @@ case "$MODE" in
     exit 1
     ;;
 esac
+
+popd
