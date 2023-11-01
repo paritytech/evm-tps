@@ -6,30 +6,35 @@ EVM_TPS_PATH="$2"
 set_balances() {
   echo "Setting up balances mode..."
   rm data/config.json
+  rm balances.log
   cp data/config.balances.json data/config.json
 }
 
 set_assets() {
   echo "Setting up assets mode..."
   rm data/config.json
+  rm assets.log
   cp data/config.assets.json data/config.json
 }
 
 set_nfts() {
   echo "Setting up NFTs mode..."
   rm data/config.json
+  rm nfts.log
   cp data/config.nfts.json data/config.json
 }
 
 set_erc20() {
   echo "Setting up ERC20 mode..."
   rm data/config.json
+  rm erc20.log
   cp data/config.erc20.json data/config.json
 }
 
 set_erc721() {
   echo "Setting up ERC721 mode..."
   rm data/config.json
+  rm erc721.log
   cp data/config.erc721.json data/config.json
 }
 
