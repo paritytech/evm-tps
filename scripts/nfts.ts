@@ -1,3 +1,4 @@
+import { Console } from 'console';
 import { ethers } from 'hardhat';
 
 const axios = require('axios');
@@ -34,7 +35,7 @@ export const deployNfts = async (amount: number): Promise<string> => {
     const gasPrice = await ethers.provider.getGasPrice();
 
     // Mint -----
-
+    console.log(`Deploying SimpleNFT contract...`);
     const SimpleNFT = await ethers.getContractFactory('SimpleNFT', deployer);
     const nft = await SimpleNFT.deploy('SimpleTokenNFT', 'STK', { gasLimit: 2_000_000, gasPrice });
     let tx = await nft.deployed();
@@ -83,8 +84,6 @@ export const transferNfts = async (nftAddress: string, amount: number) => {
         };
         let payload = await bal.signTransaction(unsigned);
         let data = await post('eth_sendRawTransaction', [payload]);
-        let txHash = data.result;
-        console.log(`[transferFrom] ${bal.address} to ${deployer.address} | ${nonce} -> ${txHash}`);
         nonce++;
         tokenId++;
     }

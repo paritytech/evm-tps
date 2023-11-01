@@ -121,6 +121,7 @@ interface TPSConfig {
     timeout: number;
     payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
     verbose: boolean;
+    automaticTrigger: boolean;
 }
 
 interface UnsignedTx {
@@ -186,6 +187,7 @@ const setConfig = async (configFilename: string, deployer: KeyringPair) => {
         timeout: 10000,
         payloads: undefined,
         verbose: false,
+        automaticTrigger: true,
     };
 
     if (fs.existsSync(configFilename)) {
@@ -943,13 +945,21 @@ const main = async () => {
     const app = express();
     app.use(BodyParser.json());
 
-    app.get('/auto', async (req: any, res: any) => {
+    if (config.automaticTrigger) {
         config = await setup();
         console.log(`[Server] Running auto()...`);
         const [status, msg] = await auto(config);
-        if (status === 0) res.send(msg);
-        else res.status(500).send(`Internal error: /auto ${msg}`);
-    });
+
+        console.log(`[Server] ${msg}`);
+    } else {
+        app.get('/auto', async (req: any, res: any) => {
+            config = await setup();
+            console.log(`[Server] Running auto()...`);
+            const [status, msg] = await auto(config);
+            if (status === 0) res.send(msg);
+            else res.status(500).send(`Internal error: /auto ${msg}`);
+        });
+    }
 
     app.get('/stats', async (req: any, res: any) => {
         try {

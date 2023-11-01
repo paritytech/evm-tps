@@ -95,6 +95,7 @@ interface TPSConfig {
     timeout: number;
     payloads: UnsignedTx[] | PopulatedTransaction[] | undefined;
     verbose: boolean;
+    automaticTrigger: boolean;
 }
 
 interface UnsignedTx {
@@ -159,6 +160,7 @@ const setConfig = async (configFilename: string, deployer: Wallet) => {
         timeout: 5000,
         payloads: undefined,
         verbose: false,
+        automaticTrigger: true,
     };
 
     if (fs.existsSync(configFilename)) {
@@ -907,18 +909,10 @@ const auto = async (config: TPSConfig, gasLimit: BigNumber, chainId: number) => 
     return [status_code, msg];
 };
 
-const getFilePath = async (symLinkPath: fs.PathLike) => {
-    let realPath = fs.readlinkSync(symLinkPath);
-    return realPath;
-};
-
 let nftAddress = '';
 const setup = async () => {
     setupDirs();
 
-    if ((EVM_TPS_CONFIG_FILE = `${EVM_TPS_ROOT_DIR}/config.json`)) {
-        EVM_TPS_CONFIG_FILE = await getFilePath(EVM_TPS_CONFIG_FILE);
-    }
     let deployer = await getDeployer(EVM_TPS_CONFIG_FILE);
     let config = await setConfig(EVM_TPS_CONFIG_FILE, deployer);
 
@@ -959,13 +953,21 @@ const main = async () => {
     const app = express();
     app.use(BodyParser.json());
 
-    app.get('/auto', async (req: any, res: any) => {
+    if (config.automaticTrigger) {
         config = await setup();
         console.log(`[Server] Running auto()...`);
         const [status, msg] = await auto(config, gasLimit, chainId);
-        if (status === 0) res.send(msg);
-        else res.status(500).send(`Internal error: /auto ${msg}`);
-    });
+
+        console.log(`[Server] ${msg}`);
+    } else {
+        app.get('/auto', async (req: any, res: any) => {
+            config = await setup();
+            console.log(`[Server] Running auto()...`);
+            const [status, msg] = await auto(config, gasLimit, chainId);
+            if (status === 0) res.send(msg);
+            else res.status(500).send(`Internal error: /auto ${msg}`);
+        });
+    }
 
     app.get('/sendRawTransaction', async (req: any, res: any) => {
         await checkTxpool(config);
