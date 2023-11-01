@@ -362,14 +362,15 @@ const batchMintTokens = async (config: TPSConfig, deployer: Wallet) => {
             nonce,
             chainId,
         };
+        nonce++;
         let payload = await deployer.signTransaction(unsigned);
         let data = await post(config, 'eth_sendRawTransaction', [payload]);
+
         let txHash = data.result;
         if (!validTxHash(txHash))
             throw Error(`[ERROR] batchMintTokens() -> ${JSON.stringify(data)}`);
         console.log(`[batchMintTokens] Minting tokens to ${sender.address} -> ${txHash}`);
         if ((k + 1) % 500 === 0) await new Promise((r) => setTimeout(r, 6000));
-        nonce++;
     }
     await getReceiptLocally(txHash!, 500, 60);
     return nonce;
@@ -379,7 +380,7 @@ const batchSendEthers = async (config: TPSConfig, deployer: Wallet, nonce: numbe
     const gasLimit = ethers.BigNumber.from('1000000');
     const chainId = await deployer.getChainId();
 
-    if (!nonce) nonce = await deployer.getTransactionCount();
+    if (!nonce) nonce = await deployer.getTransactionCount('pending');
 
     let txHash;
     for (let k = 0; k < sendersMap.size; k++) {
@@ -393,6 +394,7 @@ const batchSendEthers = async (config: TPSConfig, deployer: Wallet, nonce: numbe
             nonce,
             chainId,
         };
+        nonce++;
         let payload = await deployer.signTransaction(unsigned);
         let data = await post(config, 'eth_sendRawTransaction', [payload]);
         let txHash = data.result;
@@ -400,7 +402,6 @@ const batchSendEthers = async (config: TPSConfig, deployer: Wallet, nonce: numbe
             throw Error(`[ERROR] batchSendEthers() -> ${JSON.stringify(data)}`);
         console.log(`[batchSendEthers] Sending ETH to ${sender.address} -> ${txHash}`);
         if ((k + 1) % 500 === 0) await new Promise((r) => setTimeout(r, 6000));
-        nonce++;
     }
     await getReceiptLocally(txHash!, 500, 60);
     return nonce;

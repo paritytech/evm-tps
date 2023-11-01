@@ -530,9 +530,12 @@ const setupAssets = async (config: TPSConfig, deployer: KeyringPair) => {
     const assetId = config.txn.params[0];
     const assetZero = await (await api.at(hash)).query.assets.asset(assetId);
     if (assetZero.isEmpty) {
+        let nonce = await api.rpc.system.accountNextIndex(deployer.address);
         console.log(`[setupAssets] Creating an Asset [id:${assetId}] ...`);
         txHash = (
-            await api.tx.assets.create(assetId, deployer.address, 1).signAndSend(deployer)
+            await api.tx.assets
+                .create(assetId, deployer.address, 1)
+                .signAndSend(deployer, { nonce })
         ).toString();
     }
     console.log(`[setupAssets] Asset Created [id:${assetId}]`);
@@ -575,8 +578,11 @@ const setupNFTs = async (config: TPSConfig, deployer: KeyringPair) => {
     const collectionId = config.txn.params[0];
     const collectionZero = await (await api.at(hash)).query.nfts.collection(collectionId);
     if (collectionZero.isEmpty) {
+        let nonce = await api.rpc.system.accountNextIndex(deployer.address);
         console.log(`[setupNFTs] Creating an NFT Collection [id:${collectionId}] ...`);
-        txHash = (await api.tx.nfts.create(deployer.address, {}).signAndSend(deployer)).toString();
+        txHash = (
+            await api.tx.nfts.create(deployer.address, {}).signAndSend(deployer, { nonce })
+        ).toString();
     }
     console.log(`[setupNFTs] NFT Collection Created [id:${collectionId}]`);
     const sender = sendersMap.get(0)!;

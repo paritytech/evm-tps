@@ -16,7 +16,7 @@
     },
     "txn": {
         "module": "erc20",
-        "address": "0x970951a12F975E6762482ACA81E57D5A2A4e73F4",
+        "address": "",
         "method": "transferLoop",
         "amountIdx": 2,
         "params": [1, "<ACCOUNT>", 1],
