@@ -20,7 +20,7 @@
         "amountIdx": 1,
         "params": [0, 0, "<ACCOUNT>"],
         "gasLimit": "200000",
-        "quantity": 1000
+        "quantity": 5000
     },
     "txpoolMaxLength": -1,
     "txpoolMultiplier": 3,
