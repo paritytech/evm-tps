@@ -357,7 +357,7 @@ const submitExtrinsic = async (config: TPSConfig, api: ApiPromise, k: number, no
 
     const params = config.txn.params.map((p) => (p == '<ACCOUNT>' ? receiver.address : p));
     const txHash = (
-        await api.tx[config.txn.module][config.txn.method](...params).signAndSend(sender, { nonce })
+        await api.tx[config.txn.module][config.txn.method](...params).signAndSend(sender, { nonce, era: 0 })
     ).toString();
     if (!validTxHash(txHash)) throw Error(`[ERROR] submitExtrinsic() -> ${JSON.stringify(txHash)}`);
 
